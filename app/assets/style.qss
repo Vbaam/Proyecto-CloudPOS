@@ -1,0 +1,31 @@
+/* Tipografía y elementos base */
+* { font-size: 14px; }
+QLineEdit, QComboBox, QPushButton { padding: 6px; }
+
+/* Botón primario */
+QPushButton#primaryButton {
+    background-color: #2d8cff; color: white; border-radius: 6px; padding: 8px 12px;
+}
+QPushButton#primaryButton:disabled {
+    background-color: #a7c7ff; color: #f0f0f0;
+}
+
+/* Mensajes de error */
+QLabel#errorLabel { color: #d32f2f; }
+
+/* Indicador de estado (usa property status="ok"|"bad") */
+QLabel#statusDot[status="ok"] { background: #2e7d32; border-radius: 6px; min-width: 12px; min-height: 12px; }
+QLabel#statusDot[status="bad"] { background: #d32f2f; border-radius: 6px; min-width: 12px; min-height: 12px; }
+
+/* Tarjetas */
+QFrame[card="true"] { border: 1px solid #e0e0e0; border-radius: 8px; }
+
+/* Tablas */
+QTableView {
+    selection-background-color: #e3f2fd;
+    selection-color: #000;
+    gridline-color: #e0e0e0;
+}
+QHeaderView::section {
+    background: #f7f7f7; padding: 6px; border: 1px solid #e0e0e0;
+}

@@ -1,0 +1,1 @@
+# CloudPOS UI-only skeleton (PySide6)
