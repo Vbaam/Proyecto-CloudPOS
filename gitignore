@@ -1,0 +1,42 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg-info/
+*.egg
+*.log
+
+# Entornos virtuales
+.venv/
+venv/
+ENV/
+env/
+
+# Herramientas/IDE
+.vscode/
+.idea/
+*.code-workspace
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Qt / PySide
+*.qmlc
+*.jsc
+*.pro.user
+*.qrc.depends
+*.qrc.release
+*.qrc.debug
+
+# Build / empaquetado
+dist/
+build/
+*.spec
+
+# Archivos temporales
+*.tmp
+*.bak
+*.swp
