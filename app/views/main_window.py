@@ -1,9 +1,15 @@
 import os
 from typing import Optional, Dict
 from PySide6 import QtCore, QtGui, QtWidgets
+
+# Vistas
 from app.views.caja_view import CajaView
 from app.views.bodega_view import BodegaView
 from app.views.admin_view import AdminView
+
+# Monitor de API (incluye el LedIndicator)
+from app.servicios.api import ApiClient
+from app.servicios.api_monitor import ApiMonitor, LedIndicator
 
 PERMISSIONS: Dict[str, Dict[str, bool]] = {
     "Administrador": {"caja": True,  "bodega": True,  "admin": True},
@@ -59,6 +65,11 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self._apply_role_permissions()
 
+        # Monitor de API: actualiza el LED (verde/rojo) según conectividad
+        self._api_monitor = ApiMonitor(ApiClient(), self, interval_ms=15000)  # 15s ajustable
+        self._api_monitor.onlineChanged.connect(self.api_led.set_state)
+        self._api_monitor.start(run_immediately=True)
+
     def _status_text(self) -> str:
         ver = f" — Versión {self.app_version}" if self.app_version else ""
         return f"Usuario: {self.user} ({self.role}){ver}"
@@ -68,13 +79,13 @@ class MainWindow(QtWidgets.QMainWindow):
         lay = QtWidgets.QHBoxLayout(right_box)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(12)
-        dot = QtWidgets.QLabel()
-        dot.setObjectName("statusDot")
-        dot.setFixedSize(12, 12)
-        dot.setProperty("status", "ok")
+
         ver = QtWidgets.QLabel(f"v{self.app_version}") if self.app_version else QtWidgets.QLabel("")
+        self.api_led = LedIndicator(12, self)  # LED de estado (rojo/verde)
+        self.api_led.setToolTip("Estado de conexión a la API")
+
         lay.addWidget(ver)
-        lay.addWidget(dot)
+        lay.addWidget(self.api_led)
         self.status.addPermanentWidget(right_box)
 
     def _apply_role_permissions(self):
@@ -108,3 +119,12 @@ class MainWindow(QtWidgets.QMainWindow):
             "Acerca de CloudPOS",
             "CloudPOS — UI (solo vistas)\nPySide6/Qt • Sin backend conectado."
         )
+
+    def closeEvent(self, event: QtGui.QCloseEvent) -> None:
+        # Detiene el monitor si está activo para liberar hilos/recursos
+        try:
+            if hasattr(self, "_api_monitor"):
+                self._api_monitor.stop()
+        except Exception:
+            pass
+        return super().closeEvent(event)

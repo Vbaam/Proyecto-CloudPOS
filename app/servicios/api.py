@@ -1,6 +1,6 @@
 import os
 import json
-from urllib import request
+from urllib import request, error
 
 
 class ApiClient:
@@ -33,3 +33,19 @@ class ApiClient:
                 return json.loads(raw)
             except Exception:
                 return raw
+
+    def check_api(self) -> bool:
+        """
+        Ping ligero a la API para verificar conectividad.
+        Usa /categorias porque sabemos que existe.
+        Devuelve True si responde 2xx, False en cualquier error.
+        """
+        try:
+            url = f"{self.base_url}/categorias"
+            req = request.Request(url, headers={"accept": "application/json"})
+            with request.urlopen(req, timeout=min(5, self.timeout)) as _:
+                return True
+        except error.URLError:
+            return False
+        except Exception:
+            return False
