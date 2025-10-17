@@ -11,8 +11,6 @@ def main():
     app.setApplicationName("CloudPOS")
     app.setOrganizationName("CloudPOS")
     app.setStyle("Fusion")
-
-    # Carga de estilos (opcional)
     try:
         with open("app/assets/style.qss", "r", encoding="utf-8") as f:
             app.setStyleSheet(f.read())
@@ -23,7 +21,6 @@ def main():
     login.show()
 
     def on_login_success(user, role):
-        # Mantén una referencia viva a la ventana principal
         app.main_window = MainWindow(user=user, role=role, app_version=APP_VERSION)
         app.main_window.show()
         login.close()

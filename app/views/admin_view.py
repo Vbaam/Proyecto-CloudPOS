@@ -1,17 +1,16 @@
 from __future__ import annotations
-import csv
 from typing import Optional, Tuple
 from PySide6 import QtCore, QtGui, QtWidgets
+from app.funciones.admin import exportar_csv, aplicar_filtro_movimientos
+from app.funciones.admin import validar_nombre_categoria
+from app.servicios.api import ApiClient
+from app.servicios.categorias_service import CategoriasService
 
 
 class AdminView(QtWidgets.QWidget):
-    """
-    Vista de Administración — SOLO UI.
-    Sin IVA en reportes: columnas = Periodo, Transacciones, Total.
-    Inicia sin datos en todas las pestañas.
-    """
     def __init__(self, parent: Optional[QtWidgets.QWidget] = None):
         super().__init__(parent)
+        self._busy_cursor = False
         self.tabs = QtWidgets.QTabWidget(self)
 
         lay = QtWidgets.QVBoxLayout(self)
@@ -22,16 +21,18 @@ class AdminView(QtWidgets.QWidget):
         self._init_tab_reportes()
         self._init_tab_movimientos()
 
-    # ---------------- Categorías ----------------
     def _init_tab_categorias(self):
         w = QtWidgets.QWidget()
         v = QtWidgets.QVBoxLayout(w)
         v.setContentsMargins(8, 8, 8, 8)
 
         toolbar = QtWidgets.QHBoxLayout()
+        self.btn_cat_reload = QtWidgets.QPushButton("Recargar")
         self.btn_cat_new = QtWidgets.QPushButton("Nueva")
         self.btn_cat_edit = QtWidgets.QPushButton("Editar")
         self.btn_cat_del = QtWidgets.QPushButton("Eliminar")
+        toolbar.addWidget(self.btn_cat_reload)
+        toolbar.addSpacing(12)
         toolbar.addWidget(self.btn_cat_new)
         toolbar.addWidget(self.btn_cat_edit)
         toolbar.addWidget(self.btn_cat_del)
@@ -44,64 +45,64 @@ class AdminView(QtWidgets.QWidget):
         self.cat_table.horizontalHeader().setStretchLastSection(True)
         self.cat_table.verticalHeader().setVisible(False)
 
+        self.cat_status = QtWidgets.QLabel("")
+
         v.addLayout(toolbar)
         v.addWidget(self.cat_table, 1)
+        v.addWidget(self.cat_status)
         self.tabs.addTab(w, "Categorías")
 
         self.cat_model = QtGui.QStandardItemModel(self)
-        self.cat_model.setHorizontalHeaderLabels(["Código", "Nombre", "Descripción"])
+        self.cat_model.setHorizontalHeaderLabels(["ID", "Categoría"])
         self.cat_table.setModel(self.cat_model)
+        self.cat_table.setColumnWidth(1, 260)
 
+        self._cat_svc = CategoriasService(ApiClient(), self)
+        self._cat_svc.busy.connect(self._set_busy)
+        self._cat_svc.error.connect(self._cat_on_error)
+        self._cat_svc.categoriasCargadas.connect(self._cat_on_ok)
+        self._cat_svc.categoriaCreada.connect(self._cat_on_created)
+
+        self.btn_cat_reload.clicked.connect(self._cat_load)
         self.btn_cat_new.clicked.connect(self._cat_new)
-        self.btn_cat_edit.clicked.connect(self._cat_edit)
-        self.btn_cat_del.clicked.connect(self._cat_del)
-        self.cat_table.doubleClicked.connect(self._cat_edit)
+        self.btn_cat_edit.setEnabled(False)
+        self.btn_cat_del.setEnabled(False)
+        self.cat_table.doubleClicked.connect(lambda _=None: None)
 
-    def _cat_append_row(self, row: Tuple[str, str, str]):
-        self.cat_model.appendRow([QtGui.QStandardItem(row[0]), QtGui.QStandardItem(row[1]), QtGui.QStandardItem(row[2])])
+        self._cat_load()
 
-    def _cat_find_code(self, code: str) -> Optional[int]:
-        for r in range(self.cat_model.rowCount()):
-            if self.cat_model.item(r, 0).text() == code:
-                return r
-        return None
+    def _cat_load(self):
+        self.cat_status.setText("Cargando categorías…")
+        self._cat_svc.cargar_categorias()
 
     def _cat_new(self):
-        dlg = CategoriaDialog(self)
+        dlg = CategoryCreateDialog(self)
         if dlg.exec() == QtWidgets.QDialog.Accepted:
-            code, name, desc = dlg.values()
-            if self._cat_find_code(code) is not None:
-                QtWidgets.QMessageBox.warning(self, "Código duplicado", "Ya existe una categoría con ese código.")
+            nombre = dlg.value().strip()
+            err = validar_nombre_categoria(nombre)
+            if err:
+                QtWidgets.QMessageBox.warning(self, "Validación", err)
                 return
-            self._cat_append_row((code, name, desc))
+            self.cat_status.setText("Creando categoría…")
+            self._cat_svc.crear_categoria(nombre)
 
-    def _cat_edit(self):
-        idx = self.cat_table.currentIndex()
-        if not idx.isValid():
-            return
-        r = idx.row()
-        code = self.cat_model.item(r, 0).text()
-        name = self.cat_model.item(r, 1).text()
-        desc = self.cat_model.item(r, 2).text()
-        dlg = CategoriaDialog(self, (code, name, desc), editing=True)
-        if dlg.exec() == QtWidgets.QDialog.Accepted:
-            ncode, nname, ndesc = dlg.values()
-            if ncode != code and self._cat_find_code(ncode) is not None:
-                QtWidgets.QMessageBox.warning(self, "Código duplicado", "Ya existe una categoría con ese código.")
-                return
-            self.cat_model.item(r, 0).setText(ncode)
-            self.cat_model.item(r, 1).setText(nname)
-            self.cat_model.item(r, 2).setText(ndesc)
+    def _cat_on_created(self, msg: str):
+        QtWidgets.QMessageBox.information(self, "Categorías", msg or "Categoría creada correctamente.")
+        self._cat_load()
 
-    def _cat_del(self):
-        idx = self.cat_table.currentIndex()
-        if not idx.isValid():
-            return
-        r = idx.row()
-        if QtWidgets.QMessageBox.question(self, "Eliminar", "¿Eliminar categoría?") == QtWidgets.QMessageBox.Yes:
-            self.cat_model.removeRow(r)
+    def _cat_on_error(self, msg: str):
+        self.cat_status.setText(f"Error al operar con categorías: {msg}")
+        QtWidgets.QMessageBox.warning(self, "API", f"Ocurrió un error:\n{msg}")
 
-    # ---------------- Reportes (sin IVA) ----------------
+    def _cat_on_ok(self, items: list[dict]):
+        self.cat_model.removeRows(0, self.cat_model.rowCount())
+        for it in items:
+            cid = str(it.get("id", ""))
+            name = str(it.get("categoria", ""))
+            self.cat_model.appendRow([QtGui.QStandardItem(cid), QtGui.QStandardItem(name)])
+        n = self.cat_model.rowCount()
+        self.cat_status.setText(f"{n} categoría(s) cargada(s)" if n else "Sin categorías desde la API")
+
     def _init_tab_reportes(self):
         w = QtWidgets.QWidget()
         v = QtWidgets.QVBoxLayout(w)
@@ -146,10 +147,9 @@ class AdminView(QtWidgets.QWidget):
         self.btn_generar.clicked.connect(self._generar_reporte)
         self.btn_export.clicked.connect(self._exportar_csv)
 
-        self._generar_reporte()  # limpia
+        self._generar_reporte()
 
     def _generar_reporte(self):
-        # Sin datos hasta conectar backend
         self.rep_model.removeRows(0, self.rep_model.rowCount())
 
     def _money_item(self, v: int) -> QtGui.QStandardItem:
@@ -164,20 +164,9 @@ class AdminView(QtWidgets.QWidget):
         path, _ = QtWidgets.QFileDialog.getSaveFileName(self, "Exportar CSV", "reporte.csv", "CSV (*.csv)")
         if not path:
             return
-        with open(path, "w", newline="", encoding="utf-8") as f:
-            w = csv.writer(f, delimiter=";")
-            headers = [self.rep_model.headerData(i, QtCore.Qt.Horizontal) for i in range(self.rep_model.columnCount())]
-            w.writerow(headers)
-            for r in range(self.rep_model.rowCount()):
-                row = [
-                    self.rep_model.item(r, c).text().replace("$", "").replace(".", "")
-                    if c >= 2 else self.rep_model.item(r, c).text()
-                    for c in range(self.rep_model.columnCount())
-                ]
-                w.writerow(row)
+        exportar_csv(self.rep_model, path)
         QtWidgets.QMessageBox.information(self, "Exportar", "Archivo CSV exportado correctamente.")
 
-    # ---------------- Movimientos ----------------
     def _init_tab_movimientos(self):
         w = QtWidgets.QWidget()
         v = QtWidgets.QVBoxLayout(w)
@@ -214,10 +203,15 @@ class AdminView(QtWidgets.QWidget):
         return it
 
     def _mov_apply_filter(self):
-        text = self.mov_filter.text().lower().strip()
-        for r in range(self.mov_model.rowCount()):
-            prod = self.mov_model.item(r, 2).text().lower()
-            self.mov_table.setRowHidden(r, text not in prod)
+        aplicar_filtro_movimientos(self.mov_table, self.mov_model, self.mov_filter.text())
+
+    def _set_busy(self, busy: bool):
+        if busy and not getattr(self, "_busy_cursor", False):
+            QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.WaitCursor)
+            self._busy_cursor = True
+        elif not busy and getattr(self, "_busy_cursor", False):
+            QtWidgets.QApplication.restoreOverrideCursor()
+            self._busy_cursor = False
 
 
 class CategoriaDialog(QtWidgets.QDialog):
@@ -273,3 +267,38 @@ class CategoriaDialog(QtWidgets.QDialog):
 
     def values(self) -> Tuple[str, str, str]:
         return (self.code.text().strip(), self.name.text().strip(), self.desc.text().strip())
+
+
+class CategoryCreateDialog(QtWidgets.QDialog):
+    def __init__(self, parent: Optional[QtWidgets.QWidget] = None):
+        super().__init__(parent)
+        self.setWindowTitle("Nueva categoría")
+        self.setModal(True)
+        self.setMinimumWidth(360)
+
+        lay = QtWidgets.QVBoxLayout(self)
+        form = QtWidgets.QFormLayout()
+        self.name = QtWidgets.QLineEdit()
+        self.name.setPlaceholderText("Nombre de la categoría (p. ej. audio)")
+        form.addRow("Categoría:", self.name)
+        lay.addLayout(form)
+
+        self.error = QtWidgets.QLabel("")
+        self.error.setObjectName("errorLabel")
+        self.error.setVisible(False)
+        lay.addWidget(self.error)
+
+        btns = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel)
+        btns.accepted.connect(self._on_accept)
+        btns.rejected.connect(self.reject)
+        lay.addWidget(btns)
+
+    def _on_accept(self):
+        if not self.name.text().strip():
+            self.error.setText("La categoría es obligatoria.")
+            self.error.setVisible(True)
+            return
+        self.accept()
+
+    def value(self) -> str:
+        return self.name.text()

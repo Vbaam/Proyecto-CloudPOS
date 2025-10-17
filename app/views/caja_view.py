@@ -1,13 +1,9 @@
 from typing import List, Optional, Tuple
 from PySide6 import QtCore, QtGui, QtWidgets
+from app.funciones.caja import fmt_money, parse_money, total_carrito
 
 
 class CajaView(QtWidgets.QWidget):
-    """
-    Vista de Caja (Cajero) — SOLO UI.
-    Sin IVA: solo muestra y calcula Total (suma de líneas del carrito).
-    Inicia sin datos: sin productos, carrito vacío, y solo 'Todas' en categorías.
-    """
     def __init__(self, parent=None):
         super().__init__(parent)
         self._build_ui()
@@ -21,7 +17,6 @@ class CajaView(QtWidgets.QWidget):
         layout.setContentsMargins(12, 12, 12, 12)
         layout.setSpacing(12)
 
-        # Panel de búsqueda y lista de productos
         left = QtWidgets.QVBoxLayout()
         search_row = QtWidgets.QHBoxLayout()
         self.search_edit = QtWidgets.QLineEdit()
@@ -42,7 +37,6 @@ class CajaView(QtWidgets.QWidget):
         left.addLayout(search_row)
         left.addWidget(self.products, 1)
 
-        # Panel de carrito
         right = QtWidgets.QVBoxLayout()
         header = QtWidgets.QHBoxLayout()
         header.addWidget(QtWidgets.QLabel("Carrito de venta"))
@@ -65,7 +59,6 @@ class CajaView(QtWidgets.QWidget):
         self.cart.verticalHeader().setVisible(False)
         self.cart.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
 
-        # Totales (solo Total)
         totals = QtWidgets.QFormLayout()
         self.lbl_total = QtWidgets.QLabel("$0")
         totals.addRow("<b>Total:</b>", self.lbl_total)
@@ -90,7 +83,6 @@ class CajaView(QtWidgets.QWidget):
         layout.addLayout(left, 3)
         layout.addLayout(right, 4)
 
-        # Modelos
         self.prod_model = QtGui.QStandardItemModel(self)
         self.prod_model.setHorizontalHeaderLabels(["Código", "Producto", "Categoría", "Precio", "Stock"])
         self.products.setModel(self.prod_model)
@@ -101,7 +93,6 @@ class CajaView(QtWidgets.QWidget):
         self.cart.setModel(self.cart_model)
         self.cart.setColumnWidth(1, 220)
 
-        # Atajos
         QtGui.QShortcut(QtGui.QKeySequence("Ctrl+F"), self, activated=self.search_edit.setFocus)
         QtGui.QShortcut(QtGui.QKeySequence("Insert"), self, activated=self._agregar_producto_seleccionado)
         QtGui.QShortcut(QtGui.QKeySequence("Delete"), self, activated=self._quitar_seleccion)
@@ -109,23 +100,17 @@ class CajaView(QtWidgets.QWidget):
         QtGui.QShortcut(QtGui.QKeySequence("F6"), self, activated=lambda: self._pagar("Tarjeta"))
         QtGui.QShortcut(QtGui.QKeySequence("F12"), self, activated=self._emitir)
 
-    # ----------------- Estado vacío garantizado -----------------
+    # ----------------- Estado vacío -----------------
     def _load_empty_state(self):
-        # Limpia modelos
         if self.prod_model.rowCount() > 0:
             self.prod_model.removeRows(0, self.prod_model.rowCount())
         if self.cart_model.rowCount() > 0:
             self.cart_model.removeRows(0, self.cart_model.rowCount())
-
-        # Reinicia categorías a solo "Todas"
         self.category.blockSignals(True)
         self.category.clear()
         self.category.addItem("Todas")
         self.category.blockSignals(False)
-
-        # Sin inventario en memoria
         self._inventory: List[Tuple[str, str, str, int, int]] = []
-        self._update_stock_styles()
         self._do_filter()
 
     # ----------------- Eventos -----------------
@@ -152,20 +137,8 @@ class CajaView(QtWidgets.QWidget):
             match = (text in code or text in name) and (cat == "Todas" or cat == cat_row)
             self.products.setRowHidden(r, not match)
 
-    def _update_stock_styles(self):
-        for r in range(self.prod_model.rowCount()):
-            stock = int(self.prod_model.item(r, 4).text())
-            bg = None
-            if stock == 0:
-                bg = QtGui.QBrush(QtGui.QColor("#ffebee"))
-            elif stock <= 5:
-                bg = QtGui.QBrush(QtGui.QColor("#fff8e1"))
-            for c in range(self.prod_model.columnCount()):
-                self.prod_model.item(r, c).setBackground(bg if bg else QtGui.QBrush())
-
     # ----------------- Carrito -----------------
     def _agregar_producto_seleccionado(self):
-        # Sin productos cargados, no hará nada.
         idx = self.products.currentIndex()
         if not idx.isValid():
             return
@@ -191,21 +164,13 @@ class CajaView(QtWidgets.QWidget):
             self.cart_model.removeRows(0, self.cart_model.rowCount())
         self._update_totals()
 
-    # ----------------- Totales (sin IVA) -----------------
-    def _fmt_money(self, v: int) -> str:
-        return f"${v:,}".replace(",", ".")
-
-    def _parse_money(self, s: str) -> int:
-        return int(s.replace("$", "").replace(".", "").strip())
-
+    # ----------------- Totales -----------------
     def _update_totals(self):
-        total = 0
-        for r in range(self.cart_model.rowCount()):
-            total += self._parse_money(self.cart_model.item(r, 4).text())
-        self.lbl_total.setText(f"<b>{self._fmt_money(total)}</b>")
+        total = total_carrito(self.cart_model)
+        self.lbl_total.setText(f"<b>{fmt_money(total)}</b>")
         self.btn_emitir.setEnabled(self.cart_model.rowCount() > 0)
 
-    # ----------------- Pago/Comprobante (simulado) -----------------
+    # ----------------- Pago/Comprobante -----------------
     def _pagar(self, medio: str):
         if self.cart_model.rowCount() == 0:
             QtWidgets.QMessageBox.information(self, "Pago", "No hay productos en el carrito.")

@@ -1,25 +1,38 @@
-from typing import Optional, Tuple
+from typing import Optional, Tuple, List
 from PySide6 import QtCore, QtGui, QtWidgets
-
+from app.servicios.api import ApiClient
+from app.servicios.productos_service import ProductosService
+from app.funciones.bodega import aplicar_filtro, colorizar_stock
 
 class BodegaView(QtWidgets.QWidget):
-    """
-    Vista de Bodega — SOLO UI.
-    Inicia sin datos: tabla vacía y solo 'Todas' en categorías.
-    """
+    # -----------------------------------------
+    # Constructor e inyección de servicio
+    # -----------------------------------------
     def __init__(self, parent: Optional[QtWidgets.QWidget] = None):
         super().__init__(parent)
         self._build_ui()
         self._load_empty_state()
         self._wire_events()
+        self._busy_cursor = False
 
-    # ------------- UI -------------
+        # Servicio de productos (carga en segundo plano)
+        self._svc = ProductosService(ApiClient(), self)
+        self._svc.busy.connect(self._set_busy)
+        self._svc.error.connect(self._on_api_error)
+        self._svc.productosCargados.connect(self._on_api_ok)
+
+        # Carga inicial
+        self._load_products()
+
+    # -----------------------------------------
+    # Construcción de UI
+    # -----------------------------------------
     def _build_ui(self):
         root = QtWidgets.QVBoxLayout(self)
         root.setContentsMargins(12, 12, 12, 12)
         root.setSpacing(8)
 
-        # Fila de búsqueda
+        # Barra de búsqueda y categoría
         search_row = QtWidgets.QHBoxLayout()
         self.search_edit = QtWidgets.QLineEdit()
         self.search_edit.setPlaceholderText("Buscar por código o nombre (Ctrl+F)")
@@ -31,16 +44,20 @@ class BodegaView(QtWidgets.QWidget):
 
         # Toolbar de acciones
         toolbar = QtWidgets.QHBoxLayout()
+        self.btn_recargar = QtWidgets.QPushButton("Recargar")
         self.btn_nuevo = QtWidgets.QPushButton("Nuevo (Ctrl+N)")
         self.btn_editar = QtWidgets.QPushButton("Editar (Enter)")
         self.btn_eliminar = QtWidgets.QPushButton("Eliminar (Supr)")
         self.btn_ajustar = QtWidgets.QPushButton("Ajustar stock (Ctrl+U)")
+        toolbar.addWidget(self.btn_recargar)
+        toolbar.addSpacing(12)
         toolbar.addWidget(self.btn_nuevo)
         toolbar.addWidget(self.btn_editar)
         toolbar.addWidget(self.btn_eliminar)
         toolbar.addWidget(self.btn_ajustar)
         toolbar.addStretch(1)
 
+        # Tabla
         self.table = QtWidgets.QTableView()
         self.table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
         self.table.setSelectionMode(QtWidgets.QAbstractItemView.SingleSelection)
@@ -48,11 +65,16 @@ class BodegaView(QtWidgets.QWidget):
         self.table.horizontalHeader().setStretchLastSection(True)
         self.table.verticalHeader().setVisible(False)
 
+        # Estado
+        self.status_label = QtWidgets.QLabel("")
+
+        # Layout principal
         root.addLayout(search_row)
         root.addLayout(toolbar)
         root.addWidget(self.table, 1)
+        root.addWidget(self.status_label)
 
-        # Modelo
+        # Modelo de datos
         self.model = QtGui.QStandardItemModel(self)
         self.model.setHorizontalHeaderLabels(["Código", "Producto", "Categoría", "Precio", "Stock"])
         self.table.setModel(self.model)
@@ -66,16 +88,21 @@ class BodegaView(QtWidgets.QWidget):
         QtGui.QShortcut(QtGui.QKeySequence("Delete"), self, activated=self._eliminar)
         QtGui.QShortcut(QtGui.QKeySequence("Ctrl+U"), self, activated=self._ajustar)
 
+    # -----------------------------------------
+    # Estado vacío
+    # -----------------------------------------
     def _load_empty_state(self):
-        # Deja la tabla sin filas y el combo de categorías en estado inicial
         if self.model.rowCount() > 0:
             self.model.removeRows(0, self.model.rowCount())
-
         self.category.blockSignals(True)
         self.category.clear()
         self.category.addItem("Todas")
         self.category.blockSignals(False)
+        self.status_label.setText("")
 
+    # -----------------------------------------
+    # Ayudas para la tabla
+    # -----------------------------------------
     def _append_row(self, row: Tuple[str, str, str, int, int]):
         items = []
         for i, val in enumerate(row):
@@ -84,32 +111,69 @@ class BodegaView(QtWidgets.QWidget):
                 it.setTextAlignment(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter)
             items.append(it)
         self.model.appendRow(items)
-        # Asegura que la categoría quede disponible en el filtro
         cat = row[2]
         if self.category.findText(cat) < 0:
             self.category.addItem(cat)
 
+    # -----------------------------------------
+    # Conexión de eventos
+    # -----------------------------------------
     def _wire_events(self):
         self.search_edit.textChanged.connect(self._filter_rows)
         self.category.currentIndexChanged.connect(self._filter_rows)
         self.table.doubleClicked.connect(self._editar)
+        self.btn_recargar.clicked.connect(self._load_products)
         self.btn_nuevo.clicked.connect(self._nuevo)
         self.btn_editar.clicked.connect(self._editar)
         self.btn_eliminar.clicked.connect(self._eliminar)
         self.btn_ajustar.clicked.connect(self._ajustar)
 
-    # ------------- Filtro -------------
+    # -----------------------------------------
+    # Filtro
+    # -----------------------------------------
     def _filter_rows(self):
-        text = self.search_edit.text().lower().strip()
-        cat = self.category.currentText()
-        for r in range(self.model.rowCount()):
-            code = self.model.item(r, 0).text().lower()
-            name = self.model.item(r, 1).text().lower()
-            cat_row = self.model.item(r, 2).text()
-            match = (text in code or text in name) and (cat == "Todas" or cat == cat_row)
-            self.table.setRowHidden(r, not match)
+        aplicar_filtro(self.table, self.model, self.search_edit.text(), self.category.currentText())
 
-    # ------------- Acciones -------------
+    # -----------------------------------------
+    # Carga desde servicio/API
+    # -----------------------------------------
+    def _load_products(self):
+        self.status_label.setText("Cargando productos…")
+        self._svc.cargar_productos()
+
+    # -----------------------------------------
+    # Cursor ocupado (busy)
+    # -----------------------------------------
+    def _set_busy(self, busy: bool):
+        if busy and not getattr(self, "_busy_cursor", False):
+            QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.WaitCursor)
+            self._busy_cursor = True
+        elif not busy and getattr(self, "_busy_cursor", False):
+            QtWidgets.QApplication.restoreOverrideCursor()
+            self._busy_cursor = False
+
+    # -----------------------------------------
+    # Callbacks de API
+    # -----------------------------------------
+    def _on_api_error(self, msg: str):
+        self.status_label.setText(f"Error al cargar productos: {msg}")
+        QtWidgets.QMessageBox.warning(self, "API", f"No se pudieron cargar productos:\n{msg}")
+
+    def _on_api_ok(self, items: List[dict]):
+        self._load_empty_state()
+        for p in items:
+            code = str(p.get("id", ""))
+            name = str(p.get("nombre", ""))
+            cat = str(p.get("categoria") or "Sin categoría")
+            self._append_row((code, name, cat, 0, 0))
+        colorizar_stock(self.model)
+        self._filter_rows()
+        n = self.model.rowCount()
+        self.status_label.setText(f"{n} producto(s) cargado(s)" if n else "Sin productos desde la API")
+
+    # -----------------------------------------
+    # Acciones (Nuevo/Editar/Eliminar/Ajustar)
+    # -----------------------------------------
     def _nuevo(self):
         dlg = ProductoDialog(self)
         if dlg.exec() == QtWidgets.QDialog.Accepted:
@@ -118,6 +182,7 @@ class BodegaView(QtWidgets.QWidget):
                 QtWidgets.QMessageBox.warning(self, "Código duplicado", "Ya existe un producto con ese código.")
                 return
             self._append_row((code, name, cat, price, stock))
+            colorizar_stock(self.model)
 
     def _editar(self):
         idx = self.table.currentIndex()
@@ -142,6 +207,7 @@ class BodegaView(QtWidgets.QWidget):
             self.model.item(r, 4).setText(str(nstock))
             if self.category.findText(ncat) < 0:
                 self.category.addItem(ncat)
+            colorizar_stock(self.model)
 
     def _eliminar(self):
         idx = self.table.currentIndex()
@@ -175,9 +241,11 @@ class BodegaView(QtWidgets.QWidget):
                     return
                 new_stock = current_stock - qty
             self.model.item(r, 4).setText(str(new_stock))
-            # Aquí registrarías el movimiento con 'reason' cuando haya backend
+            colorizar_stock(self.model)
 
-    # ------------- Utilidades -------------
+    # -----------------------------------------
+    # Utilidades
+    # -----------------------------------------
     def _find_row_by_code(self, code: str) -> Optional[int]:
         for r in range(self.model.rowCount()):
             if self.model.item(r, 0).text() == code:
@@ -185,10 +253,13 @@ class BodegaView(QtWidgets.QWidget):
         return None
 
 
+# ---------------------------------------------
+# Diálogos
+# ---------------------------------------------
 class ProductoDialog(QtWidgets.QDialog):
-    """
-    Diálogo de producto: Crear/Editar.
-    """
+    # -----------------------------------------
+    # Constructor y construcción de UI
+    # -----------------------------------------
     def __init__(self, parent: Optional[QtWidgets.QWidget] = None,
                  data: Optional[Tuple[str, str, str, int, int]] = None,
                  editing: bool = False):
@@ -206,7 +277,6 @@ class ProductoDialog(QtWidgets.QDialog):
         self.cat = QtWidgets.QComboBox()
         self.cat.setEditable(True)
         self.cat.setInsertPolicy(QtWidgets.QComboBox.InsertAtTop)
-        # Sugerencias (puedes dejarlo vacío si prefieres)
         self.cat.addItems(["Alimentos", "Aseo", "Bebidas"])
 
         self.price = QtWidgets.QSpinBox()
@@ -246,6 +316,9 @@ class ProductoDialog(QtWidgets.QDialog):
             self.price.setValue(price)
             self.stock.setValue(stock)
 
+    # -----------------------------------------
+    # Validación y retorno de valores
+    # -----------------------------------------
     def _on_accept(self):
         code = self.code.text().strip()
         name = self.name.text().strip()
@@ -280,9 +353,9 @@ class ProductoDialog(QtWidgets.QDialog):
 
 
 class AjusteStockDialog(QtWidgets.QDialog):
-    """
-    Ajuste de stock: sumar o restar unidades con una razón.
-    """
+    # -----------------------------------------
+    # Constructor y construcción de UI
+    # -----------------------------------------
     def __init__(self, parent: Optional[QtWidgets.QWidget], code: str, name: str, current_stock: int):
         super().__init__(parent)
         self.setWindowTitle("Ajustar stock")
@@ -325,6 +398,9 @@ class AjusteStockDialog(QtWidgets.QDialog):
         btns.rejected.connect(self.reject)
         lay.addWidget(btns)
 
+    # -----------------------------------------
+    # Validación y retorno de valores
+    # -----------------------------------------
     def _on_accept(self):
         if int(self.qty.value()) <= 0:
             return self._err("La cantidad debe ser mayor a 0.")
