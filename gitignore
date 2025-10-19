@@ -40,3 +40,6 @@ build/
 *.tmp
 *.bak
 *.swp
+
+
+run.sh
