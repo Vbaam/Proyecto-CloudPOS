@@ -5,10 +5,9 @@ from app.servicios.api import ApiClient
 
 
 class LedIndicator(QtWidgets.QLabel):
-    """
-    Indicador redondo rojo/verde para estado de conexión.
-    Úsalo en la barra de estado u otro contenedor.
-    """
+
+    #Indicador redondo rojo/verde para estado de conexión.
+
     def __init__(self, size: int = 10, parent: QtWidgets.QWidget | None = None):
         super().__init__(parent)
         self._size = int(size)
@@ -41,10 +40,9 @@ class _PingWorker(QtCore.QObject):
 
 
 class ApiMonitor(QtCore.QObject):
-    """
-    Monitorea la API con un ping periódico y emite onlineChanged(True/False).
-    Puedes conectar esta señal a LedIndicator.set_state para reflejar el estado.
-    """
+
+    #Monitorea la API con un ping periódico y emite onlineChanged(True/False).
+
     onlineChanged = QtCore.Signal(bool)
     error = QtCore.Signal(str)
 
@@ -68,9 +66,7 @@ class ApiMonitor(QtCore.QObject):
         self._timer.stop()
 
     def bind_indicator(self, indicator: LedIndicator):
-        """
-        Conecta automáticamente el LED al estado del monitor y lo inicializa.
-        """
+        #Conecta automáticamente el LED al estado del monitor y lo inicializa.
         self.onlineChanged.connect(indicator.set_state)
         if self._online is not None:
             indicator.set_state(self._online)

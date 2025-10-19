@@ -1,185 +1,317 @@
-from typing import List, Optional, Tuple
+from __future__ import annotations
+from typing import Optional, List, Tuple, Dict
 from PySide6 import QtCore, QtGui, QtWidgets
-from app.funciones.caja import fmt_money, parse_money, total_carrito
+from app.servicios.api import ApiClient
+from app.servicios.productos_service import ProductosService
+
+
+USER_ROLE_PRODUCT = QtCore.Qt.UserRole + 1  
 
 
 class CajaView(QtWidgets.QWidget):
-    def __init__(self, parent=None):
+    """
+    Vista de Caja con:
+    - Catálogo de productos cargado desde la API (/muestra_productos)
+    - Carrito: permite agregar con cantidad, actualizar, eliminar y muestra el total
+    """
+    def __init__(self, parent: Optional[QtWidgets.QWidget] = None):
         super().__init__(parent)
+        self._busy_cursor = False
+        self._products_by_id: Dict[str, dict] = {}
         self._build_ui()
-        self._load_empty_state()
         self._wire_events()
-        self._update_totals()
 
-    # ----------------- UI -----------------
+        # Servicio de productos compartido
+        self._svc = ProductosService(ApiClient(), self)
+        self._svc.busy.connect(self._set_busy)
+        self._svc.error.connect(self._on_api_error)
+        self._svc.productosCargados.connect(self._on_api_ok)
+
+        self._load_products()
+
+    # ------------------- UI -------------------
     def _build_ui(self):
-        layout = QtWidgets.QHBoxLayout(self)
-        layout.setContentsMargins(12, 12, 12, 12)
-        layout.setSpacing(12)
+        root = QtWidgets.QHBoxLayout(self)
+        root.setContentsMargins(8, 8, 8, 8)
+        root.setSpacing(10)
 
+        # Panel izquierdo: catálogo + filtros
         left = QtWidgets.QVBoxLayout()
-        search_row = QtWidgets.QHBoxLayout()
-        self.search_edit = QtWidgets.QLineEdit()
-        self.search_edit.setPlaceholderText("Buscar por código o nombre (Ctrl+F)")
-        self.search_edit.setClearButtonEnabled(True)
-        self.category = QtWidgets.QComboBox()
-        self.category.addItem("Todas")
-        search_row.addWidget(self.search_edit, 1)
-        search_row.addWidget(self.category, 0)
+        left.setSpacing(6)
 
-        self.products = QtWidgets.QTableView()
-        self.products.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
-        self.products.setSelectionMode(QtWidgets.QAbstractItemView.SingleSelection)
-        self.products.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
-        self.products.horizontalHeader().setStretchLastSection(True)
-        self.products.verticalHeader().setVisible(False)
+        top = QtWidgets.QHBoxLayout()
+        self.search = QtWidgets.QLineEdit()
+        self.search.setPlaceholderText("Buscar producto por nombre o categoría…")
+        self.btn_recargar = QtWidgets.QPushButton("Recargar")
+        top.addWidget(self.search, 1)
+        top.addWidget(self.btn_recargar)
+        left.addLayout(top)
 
-        left.addLayout(search_row)
-        left.addWidget(self.products, 1)
+        # Tabla de catálogo
+        self.tbl_catalogo = QtWidgets.QTableView()
+        self.tbl_catalogo.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
+        self.tbl_catalogo.setSelectionMode(QtWidgets.QAbstractItemView.SingleSelection)
+        self.tbl_catalogo.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
+        self.tbl_catalogo.horizontalHeader().setStretchLastSection(True)
+        self.tbl_catalogo.verticalHeader().setVisible(False)
+        left.addWidget(self.tbl_catalogo, 1)
 
+        # Selector de cantidad + botón agregar
+        qty_row = QtWidgets.QHBoxLayout()
+        self.spn_qty = QtWidgets.QSpinBox()
+        self.spn_qty.setRange(1, 1_000_000)
+        self.spn_qty.setValue(1)
+        self.btn_agregar = QtWidgets.QPushButton("Agregar al carrito")
+        qty_row.addWidget(QtWidgets.QLabel("Cantidad:"))
+        qty_row.addWidget(self.spn_qty)
+        qty_row.addStretch(1)
+        qty_row.addWidget(self.btn_agregar)
+        left.addLayout(qty_row)
+
+        # Estado catálogo
+        self.lbl_status_catalogo = QtWidgets.QLabel("")
+        left.addWidget(self.lbl_status_catalogo)
+
+        # Panel derecho: carrito
         right = QtWidgets.QVBoxLayout()
-        header = QtWidgets.QHBoxLayout()
-        header.addWidget(QtWidgets.QLabel("Carrito de venta"))
-        header.addStretch(1)
+        right.setSpacing(6)
+
+        cart_lbl = QtWidgets.QLabel("Carrito")
+        cart_lbl.setStyleSheet("font-weight: bold;")
+        right.addWidget(cart_lbl)
+
+        self.tbl_carrito = QtWidgets.QTableView()
+        self.tbl_carrito.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
+        self.tbl_carrito.setSelectionMode(QtWidgets.QAbstractItemView.SingleSelection)
+        self.tbl_carrito.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
+        self.tbl_carrito.horizontalHeader().setStretchLastSection(True)
+        self.tbl_carrito.verticalHeader().setVisible(False)
+        right.addWidget(self.tbl_carrito, 1)
+
+        # Acciones del carrito
+        cart_actions = QtWidgets.QHBoxLayout()
+        self.btn_aumentar = QtWidgets.QPushButton("Aumentar (+)")
+        self.btn_disminuir = QtWidgets.QPushButton("Disminuir (–)")
+        self.btn_eliminar = QtWidgets.QPushButton("Eliminar (Supr)")
         self.btn_vaciar = QtWidgets.QPushButton("Vaciar")
-        self.btn_quitar = QtWidgets.QPushButton("Quitar")
-        self.btn_menos = QtWidgets.QPushButton("−")
-        self.btn_mas = QtWidgets.QPushButton("+")
-        for b in (self.btn_menos, self.btn_mas):
-            b.setFixedWidth(36)
-        header.addWidget(self.btn_menos)
-        header.addWidget(self.btn_mas)
-        header.addWidget(self.btn_quitar)
-        header.addWidget(self.btn_vaciar)
+        cart_actions.addWidget(self.btn_aumentar)
+        cart_actions.addWidget(self.btn_disminuir)
+        cart_actions.addWidget(self.btn_eliminar)
+        cart_actions.addStretch(1)
+        cart_actions.addWidget(self.btn_vaciar)
+        right.addLayout(cart_actions)
 
-        self.cart = QtWidgets.QTableView()
-        self.cart.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
-        self.cart.setSelectionMode(QtWidgets.QAbstractItemView.SingleSelection)
-        self.cart.horizontalHeader().setStretchLastSection(True)
-        self.cart.verticalHeader().setVisible(False)
-        self.cart.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
+        # Total y cobrar
+        bottom = QtWidgets.QHBoxLayout()
+        self.lbl_total = QtWidgets.QLabel("Total: $0")
+        self.lbl_total.setStyleSheet("font-size: 16px; font-weight: bold;")
+        bottom.addWidget(self.lbl_total)
+        bottom.addStretch(1)
+        self.btn_cobrar = QtWidgets.QPushButton("Cobrar")
+        bottom.addWidget(self.btn_cobrar)
+        right.addLayout(bottom)
 
-        totals = QtWidgets.QFormLayout()
-        self.lbl_total = QtWidgets.QLabel("$0")
-        totals.addRow("<b>Total:</b>", self.lbl_total)
+        # Ensamble
+        root.addLayout(left, 7)
+        root.addLayout(right, 5)
 
-        pay_row = QtWidgets.QHBoxLayout()
-        self.btn_efectivo = QtWidgets.QPushButton("Efectivo (F5)")
-        self.btn_tarjeta = QtWidgets.QPushButton("Tarjeta (F6)")
-        self.btn_emitir = QtWidgets.QPushButton("Generar comprobante (F12)")
-        self.btn_emitir.setObjectName("primaryButton")
-        pay_row.addWidget(self.btn_efectivo)
-        pay_row.addWidget(self.btn_tarjeta)
-        pay_row.addStretch(1)
-        pay_row.addWidget(self.btn_emitir)
+        # Modelos: catálogo
+        self.model_catalogo = QtGui.QStandardItemModel(self)
+        self.model_catalogo.setHorizontalHeaderLabels(["ID", "Producto", "Categoría", "Precio", "Stock"])
+        self.proxy_catalogo = QtCore.QSortFilterProxyModel(self)
+        self.proxy_catalogo.setSourceModel(self.model_catalogo)
+        self.proxy_catalogo.setFilterCaseSensitivity(QtCore.Qt.CaseInsensitive)
+        self.proxy_catalogo.setFilterKeyColumn(-1)  # todas
+        self.tbl_catalogo.setModel(self.proxy_catalogo)
+        self.tbl_catalogo.setColumnWidth(1, 260)
 
-        right.addLayout(header)
-        right.addWidget(self.cart, 1)
-        right.addSpacing(8)
-        right.addLayout(totals)
-        right.addSpacing(8)
-        right.addLayout(pay_row)
+        # Modelo: carrito
+        self.model_carrito = QtGui.QStandardItemModel(self)
+        self.model_carrito.setHorizontalHeaderLabels(["ID", "Producto", "Precio", "Cant.", "Subtotal"])
+        self.tbl_carrito.setModel(self.model_carrito)
+        # Oculta columna ID en el carrito
+        self.tbl_carrito.setColumnHidden(0, True)
 
-        layout.addLayout(left, 3)
-        layout.addLayout(right, 4)
+        # Atajos de teclado
+        QtGui.QShortcut(QtGui.QKeySequence("Return"), self, activated=self._agregar_seleccionado)
+        QtGui.QShortcut(QtGui.QKeySequence("Enter"), self, activated=self._agregar_seleccionado)
+        QtGui.QShortcut(QtGui.QKeySequence("Delete"), self, activated=self._eliminar_item_carrito)
+        QtGui.QShortcut(QtGui.QKeySequence("+"), self, activated=lambda: self._ajustar_cantidad(+1))
+        QtGui.QShortcut(QtGui.QKeySequence("-"), self, activated=lambda: self._ajustar_cantidad(-1))
 
-        self.prod_model = QtGui.QStandardItemModel(self)
-        self.prod_model.setHorizontalHeaderLabels(["Código", "Producto", "Categoría", "Precio", "Stock"])
-        self.products.setModel(self.prod_model)
-        self.products.setColumnWidth(1, 220)
-
-        self.cart_model = QtGui.QStandardItemModel(self)
-        self.cart_model.setHorizontalHeaderLabels(["Código", "Producto", "Cant.", "Precio", "Total"])
-        self.cart.setModel(self.cart_model)
-        self.cart.setColumnWidth(1, 220)
-
-        QtGui.QShortcut(QtGui.QKeySequence("Ctrl+F"), self, activated=self.search_edit.setFocus)
-        QtGui.QShortcut(QtGui.QKeySequence("Insert"), self, activated=self._agregar_producto_seleccionado)
-        QtGui.QShortcut(QtGui.QKeySequence("Delete"), self, activated=self._quitar_seleccion)
-        QtGui.QShortcut(QtGui.QKeySequence("F5"), self, activated=lambda: self._pagar("Efectivo"))
-        QtGui.QShortcut(QtGui.QKeySequence("F6"), self, activated=lambda: self._pagar("Tarjeta"))
-        QtGui.QShortcut(QtGui.QKeySequence("F12"), self, activated=self._emitir)
-
-    # ----------------- Estado vacío -----------------
-    def _load_empty_state(self):
-        if self.prod_model.rowCount() > 0:
-            self.prod_model.removeRows(0, self.prod_model.rowCount())
-        if self.cart_model.rowCount() > 0:
-            self.cart_model.removeRows(0, self.cart_model.rowCount())
-        self.category.blockSignals(True)
-        self.category.clear()
-        self.category.addItem("Todas")
-        self.category.blockSignals(False)
-        self._inventory: List[Tuple[str, str, str, int, int]] = []
-        self._do_filter()
-
-    # ----------------- Eventos -----------------
     def _wire_events(self):
-        self.search_edit.textChanged.connect(self._do_filter)
-        self.category.currentIndexChanged.connect(self._do_filter)
-        self.products.doubleClicked.connect(lambda _=None: self._agregar_producto_seleccionado())
-        self.btn_vaciar.clicked.connect(self._vaciar)
-        self.btn_quitar.clicked.connect(self._quitar_seleccion)
-        self.btn_mas.clicked.connect(lambda: self._ajustar_cantidad(+1))
-        self.btn_menos.clicked.connect(lambda: self._ajustar_cantidad(-1))
-        self.btn_emitir.clicked.connect(self._emitir)
-        self.btn_efectivo.clicked.connect(lambda: self._pagar("Efectivo"))
-        self.btn_tarjeta.clicked.connect(lambda: self._pagar("Tarjeta"))
+        self.search.textChanged.connect(self._on_filter)
+        self.btn_recargar.clicked.connect(self._load_products)
+        self.tbl_catalogo.doubleClicked.connect(self._agregar_seleccionado)
+        self.btn_agregar.clicked.connect(self._agregar_seleccionado)
 
-    # ----------------- Utilidades de tabla -----------------
-    def _do_filter(self):
-        text = self.search_edit.text().lower().strip()
-        cat = self.category.currentText()
-        for r in range(self.prod_model.rowCount()):
-            code = self.prod_model.item(r, 0).text().lower()
-            name = self.prod_model.item(r, 1).text().lower()
-            cat_row = self.prod_model.item(r, 2).text()
-            match = (text in code or text in name) and (cat == "Todas" or cat == cat_row)
-            self.products.setRowHidden(r, not match)
+        self.btn_aumentar.clicked.connect(lambda: self._ajustar_cantidad(+1))
+        self.btn_disminuir.clicked.connect(lambda: self._ajustar_cantidad(-1))
+        self.btn_eliminar.clicked.connect(self._eliminar_item_carrito)
+        self.btn_vaciar.clicked.connect(self._vaciar_carrito)
+        self.btn_cobrar.clicked.connect(self._on_cobrar)
 
-    # ----------------- Carrito -----------------
-    def _agregar_producto_seleccionado(self):
-        idx = self.products.currentIndex()
+    # ------------------- Catálogo (API) -------------------
+    def _on_filter(self, text: str):
+        self.proxy_catalogo.setFilterFixedString(text.strip())
+
+    def _load_products(self):
+        self.lbl_status_catalogo.setText("Cargando productos…")
+        self._svc.cargar_productos()
+
+    def _set_busy(self, busy: bool):
+        if busy and not getattr(self, "_busy_cursor", False):
+            QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.WaitCursor)
+            self._busy_cursor = True
+        elif not busy and getattr(self, "_busy_cursor", False):
+            QtWidgets.QApplication.restoreOverrideCursor()
+            self._busy_cursor = False
+
+    def _on_api_error(self, msg: str):
+        self.lbl_status_catalogo.setText(f"Error al cargar productos: {msg}")
+        QtWidgets.QMessageBox.warning(self, "API", f"No se pudieron cargar productos:\n{msg}")
+
+    def _on_api_ok(self, items: List[dict]):
+        self.model_catalogo.removeRows(0, self.model_catalogo.rowCount())
+        self._products_by_id.clear()
+        for p in items:
+            pid = str(p.get("id", ""))
+            name = str(p.get("nombre", ""))
+            cat = str(p.get("categoria") or "")
+            price = int(p.get("precio") or 0)
+            stock = int(p.get("stock") or 0)
+
+            row_items: list[QtGui.QStandardItem] = []
+            for i, val in enumerate((pid, name, cat, self._fmt_money(price), stock)):
+                it = QtGui.QStandardItem(str(val))
+                if i == 0:
+                    it.setData({"id": pid, "nombre": name, "categoria": cat, "precio": price, "stock": stock}, USER_ROLE_PRODUCT)
+                if i in (3, 4):
+                    it.setTextAlignment(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter)
+                row_items.append(it)
+            self.model_catalogo.appendRow(row_items)
+            self._products_by_id[pid] = {"id": pid, "nombre": name, "categoria": cat, "precio": price, "stock": stock}
+
+        n = self.model_catalogo.rowCount()
+        self.lbl_status_catalogo.setText(f"{n} producto(s) disponible(s)")
+
+    # ------------------- Carrito -------------------
+    def _agregar_seleccionado(self):
+        idx = self.tbl_catalogo.currentIndex()
         if not idx.isValid():
             return
-
-    def _current_cart_row(self) -> Optional[int]:
-        idx = self.cart.currentIndex()
-        return idx.row() if idx.isValid() else None
-
-    def _quitar_seleccion(self):
-        r = self._current_cart_row()
-        if r is None:
+        src_idx = self.proxy_catalogo.mapToSource(idx)
+        pid_item = self.model_catalogo.item(src_idx.row(), 0)
+        product = pid_item.data(USER_ROLE_PRODUCT) or {}
+        if not product:
             return
-        self.cart_model.removeRow(r)
-        self._update_totals()
+
+        qty_req = int(self.spn_qty.value())
+        self._agregar_producto_al_carrito(product, qty_req)
+
+    def _agregar_producto_al_carrito(self, product: dict, qty: int):
+        pid = str(product.get("id"))
+        name = str(product.get("nombre", ""))
+        price = int(product.get("precio") or 0)
+        stock = int(product.get("stock") or 0)
+
+        current_row = self._find_cart_row(pid)
+        current_qty = int(self.model_carrito.item(current_row, 3).text()) if current_row is not None else 0
+
+        if qty <= 0:
+            QtWidgets.QMessageBox.warning(self, "Cantidad inválida", "La cantidad debe ser mayor a 0.")
+            return
+
+        if current_qty + qty > stock:
+            QtWidgets.QMessageBox.warning(
+                self, "Stock insuficiente",
+                f"No hay stock suficiente.\nDisponible: {stock} • En carrito: {current_qty} • Solicitado: {qty}"
+            )
+            return
+
+        if current_row is None:
+            # Crear nueva fila en carrito
+            items: list[QtGui.QStandardItem] = []
+            for i, val in enumerate((pid, name, self._fmt_money(price), qty, self._fmt_money(price * qty))):
+                it = QtGui.QStandardItem(str(val))
+                if i in (2, 3, 4):
+                    it.setTextAlignment(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter)
+                items.append(it)
+            self.model_carrito.appendRow(items)
+        else:
+            # Actualizar cantidad y subtotal
+            new_qty = current_qty + qty
+            self.model_carrito.item(current_row, 3).setText(str(new_qty))
+            self.model_carrito.item(current_row, 4).setText(self._fmt_money(price * new_qty))
+
+        self._actualizar_total()
 
     def _ajustar_cantidad(self, delta: int):
-        r = self._current_cart_row()
-        if r is None:
+        idx = self.tbl_carrito.currentIndex()
+        if not idx.isValid():
+            return
+        r = idx.row()
+        pid = self.model_carrito.item(r, 0).text()
+        price = self._parse_money(self.model_carrito.item(r, 2).text())
+        qty = int(self.model_carrito.item(r, 3).text())
+        new_qty = qty + delta
+
+        # Validaciones
+        if new_qty <= 0:
+            # elimina si llega a 0 o menos
+            self.model_carrito.removeRow(r)
+            self._actualizar_total()
             return
 
-    def _vaciar(self):
-        if self.cart_model.rowCount() > 0:
-            self.cart_model.removeRows(0, self.cart_model.rowCount())
-        self._update_totals()
-
-    # ----------------- Totales -----------------
-    def _update_totals(self):
-        total = total_carrito(self.cart_model)
-        self.lbl_total.setText(f"<b>{fmt_money(total)}</b>")
-        self.btn_emitir.setEnabled(self.cart_model.rowCount() > 0)
-
-    # ----------------- Pago/Comprobante -----------------
-    def _pagar(self, medio: str):
-        if self.cart_model.rowCount() == 0:
-            QtWidgets.QMessageBox.information(self, "Pago", "No hay productos en el carrito.")
+        stock = int((self._products_by_id.get(pid) or {}).get("stock") or 0)
+        if new_qty > stock:
+            QtWidgets.QMessageBox.warning(self, "Stock insuficiente", f"Stock disponible: {stock}")
             return
-        QtWidgets.QMessageBox.information(self, "Pago", f"Pago simulado con {medio}.\n(Solo UI)")
 
-    def _emitir(self):
-        if self.cart_model.rowCount() == 0:
+        self.model_carrito.item(r, 3).setText(str(new_qty))
+        self.model_carrito.item(r, 4).setText(self._fmt_money(price * new_qty))
+        self._actualizar_total()
+
+    def _eliminar_item_carrito(self):
+        idx = self.tbl_carrito.currentIndex()
+        if not idx.isValid():
             return
-        QtWidgets.QMessageBox.information(self, "Comprobante", "Boleta generada (simulada).\n(Solo UI)")
-        self.cart_model.removeRows(0, self.cart_model.rowCount())
-        self._update_totals()
+        self.model_carrito.removeRow(idx.row())
+        self._actualizar_total()
+
+    def _vaciar_carrito(self):
+        if self.model_carrito.rowCount() == 0:
+            return
+        if QtWidgets.QMessageBox.question(self, "Vaciar carrito", "¿Eliminar todos los ítems del carrito?") == QtWidgets.QMessageBox.Yes:
+            self.model_carrito.removeRows(0, self.model_carrito.rowCount())
+            self._actualizar_total()
+
+    def _find_cart_row(self, pid: str) -> Optional[int]:
+        for r in range(self.model_carrito.rowCount()):
+            if self.model_carrito.item(r, 0).text() == pid:
+                return r
+        return None
+
+    def _actualizar_total(self):
+        total = 0
+        for r in range(self.model_carrito.rowCount()):
+            subtotal = self._parse_money(self.model_carrito.item(r, 4).text())
+            total += subtotal
+        self.lbl_total.setText(f"Total: {self._fmt_money(total)}")
+
+    def _on_cobrar(self):
+        total_text = self.lbl_total.text().replace("Total: ", "")
+        if self.model_carrito.rowCount() == 0:
+            QtWidgets.QMessageBox.information(self, "Cobrar", "El carrito está vacío.")
+            return
+        # Aquí podrías iniciar el flujo de pago (efectivo/tarjeta/QR).
+        QtWidgets.QMessageBox.information(self, "Cobrar", f"Total a cobrar: {total_text}")
+
+    # ------------------- Utilidades -------------------
+    def _fmt_money(self, v: int) -> str:
+        return f"${v:,}".replace(",", ".")
+
+    def _parse_money(self, s: str) -> int:
+        s = (s or "").strip()
+        s = s.replace("$", "").replace(".", "").replace(" ", "")
+        return int(s or "0")
