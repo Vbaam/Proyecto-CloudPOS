@@ -7,7 +7,7 @@ from app.views.caja_view import CajaView
 from app.views.bodega_view import BodegaView
 from app.views.admin_view import AdminView
 
-# Monitor de API (incluye el LedIndicator)
+# Monitor de API 
 from app.servicios.api import ApiClient
 from app.servicios.api_monitor import ApiMonitor, LedIndicator
 
@@ -66,7 +66,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._apply_role_permissions()
 
         # Monitor de API: actualiza el LED (verde/rojo) según conectividad
-        self._api_monitor = ApiMonitor(ApiClient(), self, interval_ms=15000)  # 15s ajustable
+        self._api_monitor = ApiMonitor(ApiClient(), self, interval_ms=15000)  # 15s 
         self._api_monitor.onlineChanged.connect(self.api_led.set_state)
         self._api_monitor.start(run_immediately=True)
 
@@ -121,7 +121,7 @@ class MainWindow(QtWidgets.QMainWindow):
         )
 
     def closeEvent(self, event: QtGui.QCloseEvent) -> None:
-        # Detiene el monitor si está activo para liberar hilos/recursos
+        # Detiene el monitor si está activo para liberar recursos
         try:
             if hasattr(self, "_api_monitor"):
                 self._api_monitor.stop()
