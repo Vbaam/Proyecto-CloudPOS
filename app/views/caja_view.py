@@ -3,6 +3,7 @@ from typing import Optional, List, Tuple, Dict
 from PySide6 import QtCore, QtGui, QtWidgets
 from app.servicios.api import ApiClient
 from app.servicios.productos_service import ProductosService
+from app.funciones.caja import generate_sale_json
 
 
 USER_ROLE_PRODUCT = QtCore.Qt.UserRole + 1  
@@ -18,6 +19,7 @@ class CajaView(QtWidgets.QWidget):
         super().__init__(parent)
         self._busy_cursor = False
         self._products_by_id: Dict[str, dict] = {}
+        self._last_sale_json: str | None = None
         self._build_ui()
         self._wire_events()
 
@@ -126,8 +128,9 @@ class CajaView(QtWidgets.QWidget):
         self.tbl_catalogo.setColumnWidth(1, 260)
 
         # Modelo: carrito
+        # Nuevo esquema: ["ID", "Producto", "Precio", "Precio con IVA", "Cant.", "Subtotal"]
         self.model_carrito = QtGui.QStandardItemModel(self)
-        self.model_carrito.setHorizontalHeaderLabels(["ID", "Producto", "Precio", "Cant.", "Subtotal"])
+        self.model_carrito.setHorizontalHeaderLabels(["ID", "Producto", "Precio", "Precio con IVA", "Cant.", "Subtotal"])
         self.tbl_carrito.setModel(self.model_carrito)
         # Oculta columna ID en el carrito
         self.tbl_carrito.setColumnHidden(0, True)
@@ -216,7 +219,7 @@ class CajaView(QtWidgets.QWidget):
         stock = int(product.get("stock") or 0)
 
         current_row = self._find_cart_row(pid)
-        current_qty = int(self.model_carrito.item(current_row, 3).text()) if current_row is not None else 0
+        current_qty = int(self.model_carrito.item(current_row, 4).text()) if current_row is not None else 0
 
         if qty <= 0:
             QtWidgets.QMessageBox.warning(self, "Cantidad inválida", "La cantidad debe ser mayor a 0.")
@@ -229,20 +232,23 @@ class CajaView(QtWidgets.QWidget):
             )
             return
 
+        # Calcular Precio con IVA (1.19) y subtotal en base a ese precio
+        price_with_tax = int(round(price * 1.19))
         if current_row is None:
             # Crear nueva fila en carrito
             items: list[QtGui.QStandardItem] = []
-            for i, val in enumerate((pid, name, self._fmt_money(price), qty, self._fmt_money(price * qty))):
+            for i, val in enumerate((pid, name, self._fmt_money(price), self._fmt_money(price_with_tax), qty, self._fmt_money(price_with_tax * qty))):
                 it = QtGui.QStandardItem(str(val))
-                if i in (2, 3, 4):
+                if i in (2, 3, 4, 5):
                     it.setTextAlignment(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter)
                 items.append(it)
             self.model_carrito.appendRow(items)
         else:
-            # Actualizar cantidad y subtotal
+            # Actualizar cantidad y subtotal (usar Precio con IVA en columna 3)
             new_qty = current_qty + qty
-            self.model_carrito.item(current_row, 3).setText(str(new_qty))
-            self.model_carrito.item(current_row, 4).setText(self._fmt_money(price * new_qty))
+            self.model_carrito.item(current_row, 4).setText(str(new_qty))
+            price_with_tax_existing = self._parse_money(self.model_carrito.item(current_row, 3).text())
+            self.model_carrito.item(current_row, 5).setText(self._fmt_money(price_with_tax_existing * new_qty))
 
         self._actualizar_total()
 
@@ -251,9 +257,8 @@ class CajaView(QtWidgets.QWidget):
         if not idx.isValid():
             return
         r = idx.row()
-        pid = self.model_carrito.item(r, 0).text()
-        price = self._parse_money(self.model_carrito.item(r, 2).text())
-        qty = int(self.model_carrito.item(r, 3).text())
+        price_with_tax = self._parse_money(self.model_carrito.item(r, 3).text())
+        qty = int(self.model_carrito.item(r, 4).text())
         new_qty = qty + delta
 
         # Validaciones
@@ -263,13 +268,13 @@ class CajaView(QtWidgets.QWidget):
             self._actualizar_total()
             return
 
-        stock = int((self._products_by_id.get(pid) or {}).get("stock") or 0)
+        stock = int((self._products_by_id.get(self.model_carrito.item(r, 0).text()) or {}).get("stock") or 0)
         if new_qty > stock:
             QtWidgets.QMessageBox.warning(self, "Stock insuficiente", f"Stock disponible: {stock}")
             return
 
-        self.model_carrito.item(r, 3).setText(str(new_qty))
-        self.model_carrito.item(r, 4).setText(self._fmt_money(price * new_qty))
+        self.model_carrito.item(r, 4).setText(str(new_qty))
+        self.model_carrito.item(r, 5).setText(self._fmt_money(price_with_tax * new_qty))
         self._actualizar_total()
 
     def _eliminar_item_carrito(self):
@@ -295,17 +300,23 @@ class CajaView(QtWidgets.QWidget):
     def _actualizar_total(self):
         total = 0
         for r in range(self.model_carrito.rowCount()):
-            subtotal = self._parse_money(self.model_carrito.item(r, 4).text())
+            subtotal = self._parse_money(self.model_carrito.item(r, 5).text())
             total += subtotal
         self.lbl_total.setText(f"Total: {self._fmt_money(total)}")
 
     def _on_cobrar(self):
-        total_text = self.lbl_total.text().replace("Total: ", "")
         if self.model_carrito.rowCount() == 0:
             QtWidgets.QMessageBox.information(self, "Cobrar", "El carrito está vacío.")
             return
-        # Aquí podrías iniciar el flujo de pago (efectivo/tarjeta/QR).
-        QtWidgets.QMessageBox.information(self, "Cobrar", f"Total a cobrar: {total_text}")
+
+        json_str = generate_sale_json(self.model_carrito)
+        self._last_sale_json = json_str
+
+        # imprimir en consola luego se eliminara
+        print("[CajaView] Venta (JSON):", json_str)
+
+        total_text = self.lbl_total.text().replace("Total: ", "")
+        QtWidgets.QMessageBox.information(self, "Cobrar", f"JSON de venta generado internamente.\nElementos: {self.model_carrito.rowCount()}\nTotal: {total_text}")
 
     # ------------------- Utilidades -------------------
     def _fmt_money(self, v: int) -> str:

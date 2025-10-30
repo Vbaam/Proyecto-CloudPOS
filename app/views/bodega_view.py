@@ -10,6 +10,7 @@ from app.funciones.bodega import (
     actualizar_producto,
     listar_categorias,
     actualizar_categoria,
+    eliminar_producto,
 )
 
 
@@ -48,6 +49,7 @@ class BodegaView(QtWidgets.QWidget):
         self._async_result.connect(self._handle_async_result)
 
         self._load_products()
+
 
     def _run_async(self, fn: Callable, args: tuple = (), on_ok: Optional[Callable[[Any], None]] = None,
                    on_err: Optional[Callable[[str], None]] = None):
@@ -111,11 +113,13 @@ class BodegaView(QtWidgets.QWidget):
         self.btn_nuevo = QtWidgets.QPushButton("Nuevo")
         self.btn_editar = QtWidgets.QPushButton("Editar")
         self.btn_cambiar_cat = QtWidgets.QPushButton("Cambiar categoría")
+        self.btn_eliminar = QtWidgets.QPushButton("Eliminar") 
         toolbar.addWidget(self.btn_recargar)
         toolbar.addSpacing(12)
         toolbar.addWidget(self.btn_nuevo)
         toolbar.addWidget(self.btn_editar)
         toolbar.addWidget(self.btn_cambiar_cat)
+        toolbar.addWidget(self.btn_eliminar)
         toolbar.addStretch(1)
 
         # Tabla
@@ -173,6 +177,7 @@ class BodegaView(QtWidgets.QWidget):
         self.btn_nuevo.clicked.connect(self._nuevo_api)
         self.btn_editar.clicked.connect(self._editar_api)
         self.btn_cambiar_cat.clicked.connect(self._cambiar_categoria_api)
+        self.btn_eliminar.clicked.connect(self._eliminar_api) 
 
     def _filter_rows(self):
         aplicar_filtro(self.table, self.model, self.search_edit.text(), self.category.currentText())
@@ -328,6 +333,40 @@ class BodegaView(QtWidgets.QWidget):
         self._cargar_categorias_y(_abrir_dialogo)
 
 
+        # -------- Eliminar producto --------
+    def _eliminar_api(self):
+        idx = self.table.currentIndex()
+        if not idx.isValid():
+            QtWidgets.QMessageBox.information(self, "Eliminar", "Selecciona un producto de la tabla.")
+            return
+        r = idx.row()
+        try:
+            producto_id = int(self.model.item(r, 0).text() or "0")
+        except Exception:
+            QtWidgets.QMessageBox.warning(self, "Eliminar", "ID de producto inválido.")
+            return
+        if producto_id <= 0:
+            QtWidgets.QMessageBox.warning(self, "Eliminar", "ID de producto inválido.")
+            return
+
+        if QtWidgets.QMessageBox.question(self, "Eliminar producto", f"¿Eliminar el producto ID {producto_id}?") != QtWidgets.QMessageBox.Yes:
+            return
+
+        # Ejecutar DELETE llamando a eliminar_producto de app.funciones.bodega
+        self.status_label.setText("Eliminando producto…")
+        self._set_busy(True)
+
+        def on_ok(res: Any):
+            self._set_busy(False)
+            msg = str(res or "Producto eliminado")
+            QtWidgets.QMessageBox.information(self, "Producto", msg)
+            self._load_products()
+
+        def on_err(msg: str):
+            self._set_busy(False)
+            self._on_api_error(msg)
+
+        self._run_async(eliminar_producto, (producto_id,), on_ok, on_err)
 # -------- Diálogo: crear producto --------
 class ProductoNuevoApiDialog(QtWidgets.QDialog):
     def __init__(self, parent: Optional[QtWidgets.QWidget] = None, categorias: Optional[List[dict]] = None):

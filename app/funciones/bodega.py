@@ -255,3 +255,39 @@ def actualizar_categoria(producto_id: int, categoria_id: int) -> str:
     if isinstance(res, dict):
         return res.get("message") or res.get("detail") or "Categoría actualizada"
     return "Categoría actualizada"
+
+
+# -------- Eliminar producto --------
+def eliminar_producto(producto_id: int) -> str:
+    """
+    Elimina un producto por ID usando DELETE /producto/{id}
+    - Devuelve un mensaje string en caso de éxito.
+    - Lanza RuntimeError con mensaje legible en caso de error.
+    """
+    try:
+        producto_id = int(producto_id)
+    except Exception:
+        raise RuntimeError("ID de producto inválido.")
+    if producto_id <= 0:
+        raise RuntimeError("ID de producto inválido.")
+
+    if DEBUG:
+        print(f"[bodega.eliminar_producto] DELETE /producto/{producto_id}")
+
+    res = _client.delete_json(f"/producto/{producto_id}")
+
+    if isinstance(res, dict):
+        status = int(res.get("status", 200))
+        is_error = bool(res.get("error")) or status >= 400
+        if is_error:
+            err_msg = (
+                (res.get("detail") if isinstance(res.get("detail"), str) else None)
+                or res.get("message")
+                or f"Error HTTP {status}"
+            )
+            if DEBUG:
+                print(f"[bodega.eliminar_producto] ERROR: {status} -> {err_msg}")
+            raise RuntimeError(err_msg)
+        return res.get("message") or res.get("detail") or "Producto eliminado"
+
+    return str(res or "Producto eliminado")
