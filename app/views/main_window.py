@@ -1,5 +1,5 @@
 import os
-from typing import Optional, Dict
+from typing import Optional, Dict, Any
 from PySide6 import QtCore, QtGui, QtWidgets
 
 # Vistas
@@ -11,6 +11,8 @@ from app.views.admin_view import AdminView
 from app.servicios.api import ApiClient
 from app.servicios.api_monitor import ApiMonitor, LedIndicator
 
+from app.funciones.rol import normalize_role
+
 PERMISSIONS: Dict[str, Dict[str, bool]] = {
     "Administrador": {"caja": True,  "bodega": True,  "admin": True},
     "Cajero":        {"caja": True,  "bodega": True, "admin": True},
@@ -21,13 +23,14 @@ DEV_SHOW_ALL = os.getenv("CLOUDPOS_SHOW_ALL", "0") == "1"
 
 
 class MainWindow(QtWidgets.QMainWindow):
-    def __init__(self, user: str, role: str, app_version: str = "", parent: Optional[QtWidgets.QWidget] = None):
+    def __init__(self, user: str, role: Any, app_version: str = "", parent: Optional[QtWidgets.QWidget] = None):
         super().__init__(parent)
         self.user = user
-        self.role = role
+        # Normalizar role recibido
+        self.role = normalize_role(role, default="Cajero")
         self.app_version = app_version
 
-        self.setWindowTitle(f"CloudPOS — {role} [{user}]")
+        self.setWindowTitle(f"CloudPOS — {self.role} [{user}]")
         self.resize(1100, 720)
 
         self.stacked = QtWidgets.QStackedWidget()
@@ -65,7 +68,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self._apply_role_permissions()
 
-        # Monitor de API: actualiza el LED (verde/rojo) según conectividad
+        # Monitor de API: actualiza el LED (rojo/verde) según conectividad
         self._api_monitor = ApiMonitor(ApiClient(), self, interval_ms=15000)  # 15s 
         self._api_monitor.onlineChanged.connect(self.api_led.set_state)
         self._api_monitor.start(run_immediately=True)

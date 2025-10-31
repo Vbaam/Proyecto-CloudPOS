@@ -22,8 +22,13 @@ def main():
 
     def on_login_success(user, role):
         app.main_window = MainWindow(user=user, role=role, app_version=APP_VERSION)
+        if hasattr(app.main_window, "page_caja"):
+            app.main_window.page_caja.usuario_actual = user
+        elif hasattr(app.main_window, "caja_view"):
+            app.main_window.caja_view.usuario_actual = user
         app.main_window.show()
         login.close()
+
 
     login.login_success.connect(on_login_success)
     sys.exit(app.exec())

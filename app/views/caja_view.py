@@ -309,14 +309,20 @@ class CajaView(QtWidgets.QWidget):
             QtWidgets.QMessageBox.information(self, "Cobrar", "El carrito está vacío.")
             return
 
-        json_str = generate_sale_json(self.model_carrito)
+        usuario = getattr(self, "usuario_actual", "Desconocido")
+        json_str = generate_sale_json(self.model_carrito, usuario)
         self._last_sale_json = json_str
+
 
         # imprimir en consola luego se eliminara
         print("[CajaView] Venta (JSON):", json_str)
 
         total_text = self.lbl_total.text().replace("Total: ", "")
-        QtWidgets.QMessageBox.information(self, "Cobrar", f"JSON de venta generado internamente.\nElementos: {self.model_carrito.rowCount()}\nTotal: {total_text}")
+        QtWidgets.QMessageBox.information(
+            self,
+            "Cobrar",
+            f"JSON de venta generado internamente.\nUsuario: {usuario}\nElementos: {self.model_carrito.rowCount()}\nTotal: {total_text}"
+        )
 
     # ------------------- Utilidades -------------------
     def _fmt_money(self, v: int) -> str:

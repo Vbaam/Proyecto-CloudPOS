@@ -14,7 +14,7 @@ def total_carrito(model: QtGui.QStandardItemModel) -> int:
         total += parse_money(model.item(r, 5).text())
     return total
 
-def generate_sale_json(model: QtGui.QStandardItemModel) -> str:
+def generate_sale_json(model: QtGui.QStandardItemModel, usuario: str = "Desconocido") -> str:
     items = []
     total = 0
     for r in range(model.rowCount()):
@@ -44,18 +44,18 @@ def generate_sale_json(model: QtGui.QStandardItemModel) -> str:
         })
 
     now = datetime.now()
-    fecha = now.date().isoformat()  # YYYY-MM-DD
-    hora = now.time().isoformat(timespec="seconds")  # HH:MM:SS
+    fecha = now.date().isoformat()
+    hora = now.time().isoformat(timespec="seconds")
 
     payload = {
         "fecha": fecha,
         "hora": hora,
+        "usuario": usuario, 
         "total": total,
         "items": items,
     }
 
     try:
-        json_str = json.dumps(payload, ensure_ascii=False)
+        return json.dumps(payload, ensure_ascii=False)
     except Exception:
-        json_str = json.dumps(payload, ensure_ascii=False, default=str)
-    return json_str
+        return json.dumps(payload, ensure_ascii=False, default=str)
