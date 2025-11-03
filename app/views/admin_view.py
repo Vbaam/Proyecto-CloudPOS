@@ -29,12 +29,10 @@ class AdminView(QtWidgets.QWidget):
         toolbar = QtWidgets.QHBoxLayout()
         self.btn_cat_reload = QtWidgets.QPushButton("Recargar")
         self.btn_cat_new = QtWidgets.QPushButton("Nueva")
-        self.btn_cat_edit = QtWidgets.QPushButton("Editar")
         self.btn_cat_del = QtWidgets.QPushButton("Eliminar")
         toolbar.addWidget(self.btn_cat_reload)
         toolbar.addSpacing(12)
         toolbar.addWidget(self.btn_cat_new)
-        toolbar.addWidget(self.btn_cat_edit)
         toolbar.addWidget(self.btn_cat_del)
         toolbar.addStretch(1)
 
@@ -62,11 +60,17 @@ class AdminView(QtWidgets.QWidget):
         self._cat_svc.error.connect(self._cat_on_error)
         self._cat_svc.categoriasCargadas.connect(self._cat_on_ok)
         self._cat_svc.categoriaCreada.connect(self._cat_on_created)
+        self._cat_svc.categoriaEliminada.connect(self._cat_on_deleted)
 
         self.btn_cat_reload.clicked.connect(self._cat_load)
         self.btn_cat_new.clicked.connect(self._cat_new)
-        self.btn_cat_edit.setEnabled(False)
         self.btn_cat_del.setEnabled(False)
+        sel_model = self.cat_table.selectionModel()
+        if sel_model:
+            sel_model.selectionChanged.connect(
+                lambda *_: self.btn_cat_del.setEnabled(self.cat_table.currentIndex().isValid())
+        )
+        self.btn_cat_del.clicked.connect(self._cat_delete)        
         self.cat_table.doubleClicked.connect(lambda _=None: None)
 
         self._cat_load()
@@ -213,6 +217,32 @@ class AdminView(QtWidgets.QWidget):
             QtWidgets.QApplication.restoreOverrideCursor()
             self._busy_cursor = False
 
+    def _cat_delete(self):
+        idx = self.cat_table.currentIndex()
+        if not idx.isValid():
+            QtWidgets.QMessageBox.information(self, "Eliminar", "Selecciona una categoría de la tabla.")
+            return
+        r = idx.row()
+        try:
+            cat_id = int(self.cat_model.item(r, 0).text() or "0")
+        except Exception:
+            QtWidgets.QMessageBox.warning(self, "Eliminar", "ID de categoría inválido.")
+            return
+        if cat_id <= 0:
+            QtWidgets.QMessageBox.warning(self, "Eliminar", "ID de categoría inválido.")
+            return
+
+        if QtWidgets.QMessageBox.question(self, "Eliminar categoría",
+                                        f"¿Eliminar la categoría ID {cat_id}?") != QtWidgets.QMessageBox.Yes:
+            return
+
+        self.cat_status.setText("Eliminando categoría…")
+        self._cat_svc.eliminar_categoria(cat_id)
+
+    def _cat_on_deleted(self, msg: str):
+        QtWidgets.QMessageBox.information(self, "Categorías", msg or "Categoría eliminada.")
+        self._cat_load()
+
 
 class CategoriaDialog(QtWidgets.QDialog):
     def __init__(self, parent: Optional[QtWidgets.QWidget] = None,
@@ -302,3 +332,4 @@ class CategoryCreateDialog(QtWidgets.QDialog):
 
     def value(self) -> str:
         return self.name.text()
+

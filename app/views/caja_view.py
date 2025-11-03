@@ -8,6 +8,117 @@ from app.funciones.caja import generate_sale_json
 
 USER_ROLE_PRODUCT = QtCore.Qt.UserRole + 1  
 
+class CashPaymentDialog(QtWidgets.QDialog):
+    def __init__(self, parent: Optional[QtWidgets.QWidget], model_carrito: QtGui.QStandardItemModel, parse_money: callable, fmt_money: callable):
+        super().__init__(parent)
+        self.setWindowTitle("Cobro en efectivo")
+        self.setModal(True)
+        self.setMinimumWidth(520)
+
+        self._model = model_carrito
+        self._parse_money = parse_money
+        self._fmt_money = fmt_money
+
+        lay = QtWidgets.QVBoxLayout(self)
+        lay.setContentsMargins(12, 12, 12, 12)
+        lay.setSpacing(8)
+
+        # Tabla resumida del carrito (Producto, Cant., Subtotal)
+        self.tbl = QtWidgets.QTableWidget(self)
+        self.tbl.setColumnCount(3)
+        self.tbl.setHorizontalHeaderLabels(["Producto", "Cant.", "Subtotal"])
+        self.tbl.horizontalHeader().setStretchLastSection(True)
+        self.tbl.verticalHeader().setVisible(False)
+        self.tbl.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
+        self._load_cart_rows()
+        lay.addWidget(self.tbl)
+
+        # Total
+        self.total = self._calc_total()
+        self.lbl_total = QtWidgets.QLabel(f"Total: {self._fmt_money(self.total)}")
+        font = self.lbl_total.font()
+        font.setBold(True)
+        self.lbl_total.setFont(font)
+        lay.addWidget(self.lbl_total)
+
+        # Monto recibido
+        frm = QtWidgets.QFormLayout()
+        self.efectivo_edit = QtWidgets.QLineEdit()
+        self.efectivo_edit.setPlaceholderText("Ingrese efectivo recibido (ej: 10000)")
+        self.efectivo_edit.setClearButtonEnabled(True)
+        self.efectivo_edit.setValidator(QtGui.QIntValidator(0, 1_000_000_000, self))
+        frm.addRow("Efectivo:", self.efectivo_edit)
+
+        self.lbl_vuelto = QtWidgets.QLabel("Vuelto: $0")
+        frm.addRow("Vuelto:", self.lbl_vuelto)
+        lay.addLayout(frm)
+
+        # Botones
+        btns = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel)
+        btns.button(QtWidgets.QDialogButtonBox.Ok).setText("Terminar")
+        btns.button(QtWidgets.QDialogButtonBox.Cancel).setText("Cancelar")
+        btns.accepted.connect(self._on_accept)
+        btns.rejected.connect(self.reject)
+        lay.addWidget(btns)
+
+        # Eventos
+        self.efectivo_edit.textChanged.connect(self._recalc_change)
+
+        # Estado inicial
+        self._recalc_change()
+
+    def _load_cart_rows(self):
+        rows = self._model.rowCount()
+        self.tbl.setRowCount(rows)
+        r = 0
+        for r in range(rows):
+            prod = self._model.item(r, 1).text() if self._model.item(r, 1) else ""
+            cant = self._model.item(r, 4).text() if self._model.item(r, 4) else "0"
+            sub  = self._model.item(r, 5).text() if self._model.item(r, 5) else "$0"
+
+            it_prod = QtWidgets.QTableWidgetItem(prod)
+            it_cant = QtWidgets.QTableWidgetItem(cant)
+            it_sub  = QtWidgets.QTableWidgetItem(sub)
+
+            it_cant.setTextAlignment(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter)
+            it_sub.setTextAlignment(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter)
+
+            self.tbl.setItem(r, 0, it_prod)
+            self.tbl.setItem(r, 1, it_cant)
+            self.tbl.setItem(r, 2, it_sub)
+
+        self.tbl.resizeColumnsToContents()
+
+    def _calc_total(self) -> int:
+        total = 0
+        for r in range(self._model.rowCount()):
+            subtotal = self._parse_money(self._model.item(r, 5).text())
+            total += subtotal
+        return total
+
+    def _recalc_change(self):
+        try:
+            efectivo = int(self.efectivo_edit.text() or "0")
+        except Exception:
+            efectivo = 0
+        vuelto = max(0, efectivo - self.total)
+        self.lbl_vuelto.setText(f"Vuelto: {self._fmt_money(vuelto)}")
+
+        # Deshabilita "Terminar" si no alcanza el efectivo
+        btn_ok = self.findChild(QtWidgets.QDialogButtonBox).button(QtWidgets.QDialogButtonBox.Ok)
+        if btn_ok:
+            btn_ok.setEnabled(efectivo >= self.total)
+
+    def _on_accept(self):
+        # Valida nuevamente
+        try:
+            efectivo = int(self.efectivo_edit.text() or "0")
+        except Exception:
+            efectivo = 0
+        if efectivo < self.total:
+            QtWidgets.QMessageBox.warning(self, "Efectivo insuficiente", "El monto ingresado es menor que el total.")
+            return
+        self.accept()
 
 class CajaView(QtWidgets.QWidget):
     """
@@ -309,20 +420,60 @@ class CajaView(QtWidgets.QWidget):
             QtWidgets.QMessageBox.information(self, "Cobrar", "El carrito está vacío.")
             return
 
+        # Evitar dobles disparos
+        if getattr(self, "_sale_in_progress", False):
+            return
+        self._sale_in_progress = True
+
+        # Preguntar método de pago
+        mb = QtWidgets.QMessageBox(self)
+        mb.setWindowTitle("Cobrar")
+        mb.setText("Selecciona el método de pago:")
+        btn_efectivo = mb.addButton("Efectivo", QtWidgets.QMessageBox.AcceptRole)
+        btn_tarjeta  = mb.addButton("Tarjeta",  QtWidgets.QMessageBox.ActionRole)
+        mb.addButton("Cancelar", QtWidgets.QMessageBox.RejectRole)
+        mb.exec()
+
+        clicked = mb.clickedButton()
+        # Cancelado
+        if clicked is None or mb.buttonRole(clicked) == QtWidgets.QMessageBox.RejectRole:
+            self._sale_in_progress = False
+            return
+
         usuario = getattr(self, "usuario_actual", "Desconocido")
+
+        if clicked == btn_tarjeta:
+            # Generar una sola vez
+            self._generar_json_venta(usuario, metodo_pago="Tarjeta")
+            self._sale_in_progress = False
+            return
+
+        if clicked == btn_efectivo:
+            # Mostrar diálogo de efectivo y, si acepta, generar una sola vez
+            dlg = CashPaymentDialog(self, self.model_carrito, self._parse_money, self._fmt_money)
+            if dlg.exec() == QtWidgets.QDialog.Accepted:
+                self._generar_json_venta(usuario, metodo_pago="Efectivo")
+            # si cancela, no pasa nada
+            self._sale_in_progress = False
+            return
+
+    def _generar_json_venta(self, usuario: str, metodo_pago: str):
+        # Generar JSON 
         json_str = generate_sale_json(self.model_carrito, usuario)
         self._last_sale_json = json_str
 
-
-        # imprimir en consola luego se eliminara
         print("[CajaView] Venta (JSON):", json_str)
 
         total_text = self.lbl_total.text().replace("Total: ", "")
         QtWidgets.QMessageBox.information(
-            self,
-            "Cobrar",
-            f"JSON de venta generado internamente.\nUsuario: {usuario}\nElementos: {self.model_carrito.rowCount()}\nTotal: {total_text}"
+            self, "Cobrar",
+            f"JSON de venta generado internamente.\n"
+            f"Usuario: {usuario}\n"
+            f"Método: {metodo_pago}\n"
+            f"Elementos: {self.model_carrito.rowCount()}\n"
+            f"Total: {total_text}"
         )
+
 
     # ------------------- Utilidades -------------------
     def _fmt_money(self, v: int) -> str:

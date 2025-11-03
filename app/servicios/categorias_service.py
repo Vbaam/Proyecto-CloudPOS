@@ -59,10 +59,41 @@ class _CrearCategoriaWorker(QtCore.QObject):
                 print(f"[CategoriasService] POST /categorias ERROR: {e!r}")
             self.finished.emit("", str(e))
 
+class _EliminarCategoriaWorker(QtCore.QObject):
+    finished = QtCore.Signal(str, str)  # (mensaje, error)
+
+    def __init__(self, client: ApiClient, cat_id: int):
+        super().__init__()
+        self.client = client
+        self.cat_id = int(cat_id)
+
+    @QtCore.Slot()
+    def run(self):
+        try:
+            res = self.client.delete_json(f"/categorias/{self.cat_id}")
+            # Normalizar mensaje
+            if isinstance(res, dict):
+                status = int(res.get("status", 200))
+                is_error = bool(res.get("error")) or status >= 400
+                if is_error:
+                    msg = (
+                        (res.get("detail") if isinstance(res.get("detail"), str) else None)
+                        or res.get("message")
+                        or f"Error HTTP {status}"
+                    )
+                    self.finished.emit("", msg)
+                    return
+                msg_ok = res.get("message") or res.get("detail") or "Categoría eliminada"
+                self.finished.emit(msg_ok, "")
+            else:
+                self.finished.emit(str(res or "Categoría eliminada"), "")
+        except Exception as e:
+            self.finished.emit("", str(e))
 
 class CategoriasService(QtCore.QObject):
     categoriasCargadas = QtCore.Signal(list)
     categoriaCreada = QtCore.Signal(str)
+    categoriaEliminada = QtCore.Signal(str)
     error = QtCore.Signal(str)
     busy = QtCore.Signal(bool)
 
@@ -127,3 +158,21 @@ class CategoriasService(QtCore.QObject):
             self.error.emit(err)
         else:
             self.categoriaCreada.emit(mensaje)
+            
+    def eliminar_categoria(self, cat_id: int):
+        worker = _EliminarCategoriaWorker(self.client, int(cat_id))
+        if not self._start_thread(worker):
+            return
+        self._thread.started.connect(worker.run)
+        worker.finished.connect(self._on_delete_finished)
+        worker.finished.connect(self._thread.quit)
+        worker.finished.connect(worker.deleteLater)
+        self._thread.start()
+
+    @QtCore.Slot(str, str)
+    def _on_delete_finished(self, mensaje: str, err: str):
+        self.busy.emit(False)
+        if err:
+            self.error.emit(err)
+        else:
+            self.categoriaEliminada.emit(mensaje or "Categoría eliminada")

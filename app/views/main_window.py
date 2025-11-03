@@ -15,7 +15,7 @@ from app.funciones.rol import normalize_role
 
 PERMISSIONS: Dict[str, Dict[str, bool]] = {
     "Administrador": {"caja": True,  "bodega": True,  "admin": True},
-    "Cajero":        {"caja": True,  "bodega": True, "admin": True},
+    "Cajero":        {"caja": True,  "bodega": False, "admin": False},
     "Bodega":        {"caja": False, "bodega": True,  "admin": False},
 }
 
