@@ -1,10 +1,12 @@
 from __future__ import annotations
 from typing import Optional, Tuple
 from PySide6 import QtCore, QtGui, QtWidgets
+
 from app.funciones.admin import exportar_csv, aplicar_filtro_movimientos
 from app.funciones.admin import validar_nombre_categoria
 from app.servicios.api import ApiClient
 from app.servicios.categorias_service import CategoriasService
+from app.servicios.usuarios_service import UsuariosService
 
 
 class AdminView(QtWidgets.QWidget):
@@ -20,6 +22,10 @@ class AdminView(QtWidgets.QWidget):
         self._init_tab_categorias()
         self._init_tab_reportes()
         self._init_tab_movimientos()
+        self._init_tab_usuarios() 
+
+
+    # CATEGORÍAS
 
     def _init_tab_categorias(self):
         w = QtWidgets.QWidget()
@@ -69,8 +75,8 @@ class AdminView(QtWidgets.QWidget):
         if sel_model:
             sel_model.selectionChanged.connect(
                 lambda *_: self.btn_cat_del.setEnabled(self.cat_table.currentIndex().isValid())
-        )
-        self.btn_cat_del.clicked.connect(self._cat_delete)        
+            )
+        self.btn_cat_del.clicked.connect(self._cat_delete)
         self.cat_table.doubleClicked.connect(lambda _=None: None)
 
         self._cat_load()
@@ -106,6 +112,35 @@ class AdminView(QtWidgets.QWidget):
             self.cat_model.appendRow([QtGui.QStandardItem(cid), QtGui.QStandardItem(name)])
         n = self.cat_model.rowCount()
         self.cat_status.setText(f"{n} categoría(s) cargada(s)" if n else "Sin categorías desde la API")
+
+    def _cat_delete(self):
+        idx = self.cat_table.currentIndex()
+        if not idx.isValid():
+            QtWidgets.QMessageBox.information(self, "Eliminar", "Selecciona una categoría de la tabla.")
+            return
+        r = idx.row()
+        try:
+            cat_id = int(self.cat_model.item(r, 0).text() or "0")
+        except Exception:
+            QtWidgets.QMessageBox.warning(self, "Eliminar", "ID de categoría inválido.")
+            return
+        if cat_id <= 0:
+            QtWidgets.QMessageBox.warning(self, "Eliminar", "ID de categoría inválido.")
+            return
+
+        if QtWidgets.QMessageBox.question(self, "Eliminar categoría",
+                                          f"¿Eliminar la categoría ID {cat_id}?") != QtWidgets.QMessageBox.Yes:
+            return
+
+        self.cat_status.setText("Eliminando categoría…")
+        self._cat_svc.eliminar_categoria(cat_id)
+
+    def _cat_on_deleted(self, msg: str):
+        QtWidgets.QMessageBox.information(self, "Categorías", msg or "Categoría eliminada.")
+        self._cat_load()
+
+
+    # REPORTES
 
     def _init_tab_reportes(self):
         w = QtWidgets.QWidget()
@@ -209,6 +244,135 @@ class AdminView(QtWidgets.QWidget):
     def _mov_apply_filter(self):
         aplicar_filtro_movimientos(self.mov_table, self.mov_model, self.mov_filter.text())
 
+
+    # USUARIOS 
+
+    def _init_tab_usuarios(self):
+        w = QtWidgets.QWidget()
+        v = QtWidgets.QVBoxLayout(w)
+        v.setContentsMargins(8, 8, 8, 8)
+
+        # toolbar
+        toolbar = QtWidgets.QHBoxLayout()
+        self.btn_usr_reload = QtWidgets.QPushButton("Recargar")
+        self.btn_usr_new = QtWidgets.QPushButton("Nuevo usuario")
+        self.btn_usr_edit_name = QtWidgets.QPushButton("Editar nombre")
+        self.btn_usr_edit_pwd = QtWidgets.QPushButton("Cambiar contraseña")
+        toolbar.addWidget(self.btn_usr_reload)
+        toolbar.addWidget(self.btn_usr_new)
+        toolbar.addWidget(self.btn_usr_edit_name)
+        toolbar.addWidget(self.btn_usr_edit_pwd)
+        toolbar.addStretch(1)
+        v.addLayout(toolbar)
+
+        # tabla de usuarios
+        self.tbl_usuarios = QtWidgets.QTableWidget(0, 3)
+        self.tbl_usuarios.setHorizontalHeaderLabels(["ID", "Nombre", "Rol"])
+        self.tbl_usuarios.verticalHeader().setVisible(False)
+        self.tbl_usuarios.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
+        self.tbl_usuarios.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
+        self.tbl_usuarios.setSelectionMode(QtWidgets.QAbstractItemView.SingleSelection)
+        v.addWidget(self.tbl_usuarios)
+
+        header = self.tbl_usuarios.horizontalHeader()
+        header.setSectionResizeMode(0, QtWidgets.QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(1, QtWidgets.QHeaderView.Stretch)
+        header.setSectionResizeMode(2, QtWidgets.QHeaderView.ResizeToContents)
+
+        self.lbl_usr_status = QtWidgets.QLabel("")
+        v.addWidget(self.lbl_usr_status)
+
+        # servicio de usuarios
+        self._usr_svc = UsuariosService(ApiClient(), self)
+        self._usr_svc.busy.connect(lambda b: self.lbl_usr_status.setText("Cargando..." if b else ""))
+        self._usr_svc.error.connect(lambda e: QtWidgets.QMessageBox.warning(self, "Usuarios", e))
+        self._usr_svc.usuariosListados.connect(self._on_users_loaded)
+        self._usr_svc.usuarioCreado.connect(self._on_user_created)
+        self._usr_svc.usuarioActualizado.connect(self._on_user_updated)
+
+        self.btn_usr_reload.clicked.connect(self._usr_svc.listar)
+        self.btn_usr_new.clicked.connect(self._on_new_user)
+        self.btn_usr_edit_name.clicked.connect(self._on_edit_user_name)
+        self.btn_usr_edit_pwd.clicked.connect(self._on_edit_user_pwd)
+
+        self.tabs.addTab(w, "Usuarios")
+
+        self._usr_svc.listar()
+
+    def _on_users_loaded(self, usuarios: list):
+        self.tbl_usuarios.setRowCount(0)
+        for u in usuarios:
+            row = self.tbl_usuarios.rowCount()
+            self.tbl_usuarios.insertRow(row)
+
+            uid = u.get("id", "")
+            nombre = u.get("nombre", "")
+            rol = u.get("rol", "")  
+
+            self.tbl_usuarios.setItem(row, 0, QtWidgets.QTableWidgetItem(str(uid)))
+            self.tbl_usuarios.setItem(row, 1, QtWidgets.QTableWidgetItem(str(nombre)))
+            self.tbl_usuarios.setItem(row, 2, QtWidgets.QTableWidgetItem(str(rol)))
+
+        self.lbl_usr_status.setText(f"Usuarios cargados: {len(usuarios)}")
+
+    def _on_user_created(self, msg: str):
+        QtWidgets.QMessageBox.information(self, "Usuarios", msg or "Usuario creado.")
+        self._usr_svc.listar()
+
+    def _get_selected_user_id(self) -> int | None:
+        idx = self.tbl_usuarios.currentRow()
+        if idx < 0:
+            return None
+        item = self.tbl_usuarios.item(idx, 0)
+        if not item:
+            return None
+        try:
+            return int(item.text())
+        except Exception:
+            return None
+
+
+    def _on_edit_user_name(self):
+        user_id = self._get_selected_user_id()
+        if not user_id:
+            QtWidgets.QMessageBox.information(self, "Usuarios", "Selecciona un usuario primero.")
+            return
+        current_name_item = self.tbl_usuarios.item(self.tbl_usuarios.currentRow(), 1)
+        current_name = current_name_item.text() if current_name_item else ""
+        new_name, ok = QtWidgets.QInputDialog.getText(self, "Editar nombre", "Nuevo nombre:", text=current_name)
+        if not ok or not new_name.strip():
+            return
+        self._usr_svc.actualizar_nombre(user_id, new_name.strip())
+
+
+    def _on_edit_user_pwd(self):
+        user_id = self._get_selected_user_id()
+        if not user_id:
+            QtWidgets.QMessageBox.information(self, "Usuarios", "Selecciona un usuario primero.")
+            return
+        new_pwd, ok = QtWidgets.QInputDialog.getText(
+            self,
+            "Cambiar contraseña",
+            "Nueva contraseña:",
+            echo=QtWidgets.QLineEdit.Password
+        )
+        if not ok or not new_pwd:
+            return
+        self._usr_svc.actualizar_contrasena(user_id, new_pwd)
+
+    def _on_user_updated(self, msg: str):
+        QtWidgets.QMessageBox.information(self, "Usuarios", msg or "Usuario actualizado.")
+        self._usr_svc.listar()
+
+    def _on_new_user(self):
+        dlg = NewUserDialog(self)
+        if dlg.exec() == QtWidgets.QDialog.Accepted:
+            payload = dlg.get_payload()
+            if not payload["nombre"] or not payload["contrasena"]:
+                QtWidgets.QMessageBox.warning(self, "Usuarios", "Nombre y contraseña son obligatorios.")
+                return
+            self._usr_svc.crear(payload)
+
     def _set_busy(self, busy: bool):
         if busy and not getattr(self, "_busy_cursor", False):
             QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.WaitCursor)
@@ -216,32 +380,6 @@ class AdminView(QtWidgets.QWidget):
         elif not busy and getattr(self, "_busy_cursor", False):
             QtWidgets.QApplication.restoreOverrideCursor()
             self._busy_cursor = False
-
-    def _cat_delete(self):
-        idx = self.cat_table.currentIndex()
-        if not idx.isValid():
-            QtWidgets.QMessageBox.information(self, "Eliminar", "Selecciona una categoría de la tabla.")
-            return
-        r = idx.row()
-        try:
-            cat_id = int(self.cat_model.item(r, 0).text() or "0")
-        except Exception:
-            QtWidgets.QMessageBox.warning(self, "Eliminar", "ID de categoría inválido.")
-            return
-        if cat_id <= 0:
-            QtWidgets.QMessageBox.warning(self, "Eliminar", "ID de categoría inválido.")
-            return
-
-        if QtWidgets.QMessageBox.question(self, "Eliminar categoría",
-                                        f"¿Eliminar la categoría ID {cat_id}?") != QtWidgets.QMessageBox.Yes:
-            return
-
-        self.cat_status.setText("Eliminando categoría…")
-        self._cat_svc.eliminar_categoria(cat_id)
-
-    def _cat_on_deleted(self, msg: str):
-        QtWidgets.QMessageBox.information(self, "Categorías", msg or "Categoría eliminada.")
-        self._cat_load()
 
 
 class CategoriaDialog(QtWidgets.QDialog):
@@ -333,3 +471,42 @@ class CategoryCreateDialog(QtWidgets.QDialog):
     def value(self) -> str:
         return self.name.text()
 
+
+
+# Diálogo NUEVO usuario
+
+class NewUserDialog(QtWidgets.QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Crear usuario")
+        self.setModal(True)
+        layout = QtWidgets.QFormLayout(self)
+
+        self.txt_nombre = QtWidgets.QLineEdit()
+        self.txt_contrasena = QtWidgets.QLineEdit()
+        self.txt_contrasena.setEchoMode(QtWidgets.QLineEdit.Password)
+
+        self.cbo_rol = QtWidgets.QComboBox()
+        self.cbo_rol.addItem("Caja", 2)
+        self.cbo_rol.addItem("Bodega", 3)
+
+        layout.addRow("Nombre:", self.txt_nombre)
+        layout.addRow("Contraseña:", self.txt_contrasena)
+        layout.addRow("Rol:", self.cbo_rol) 
+
+        btns = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel
+        )
+        btns.accepted.connect(self.accept)
+        btns.rejected.connect(self.reject)
+        layout.addRow(btns)
+
+    def get_payload(self) -> dict:
+        from datetime import datetime
+        rol_id = self.cbo_rol.currentData() 
+        return {
+            "nombre": self.txt_nombre.text().strip(),
+            "contrasena": self.txt_contrasena.text(),
+            "rol_id": int(rol_id),
+            "fecha": datetime.now().isoformat()
+        }
