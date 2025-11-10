@@ -1,9 +1,9 @@
+# app/views/admin_view.py
 from __future__ import annotations
-from typing import Optional, Tuple
+from typing import Optional, Tuple, List
 from PySide6 import QtCore, QtGui, QtWidgets
 
-from app.funciones.admin import exportar_csv, aplicar_filtro_movimientos
-from app.funciones.admin import validar_nombre_categoria
+from app.funciones.admin import exportar_csv, aplicar_filtro_movimientos, validar_nombre_categoria
 from app.servicios.api import ApiClient
 from app.servicios.categorias_service import CategoriasService
 from app.servicios.usuarios_service import UsuariosService
@@ -12,18 +12,20 @@ from app.servicios.usuarios_service import UsuariosService
 class AdminView(QtWidgets.QWidget):
     def __init__(self, parent: Optional[QtWidgets.QWidget] = None):
         super().__init__(parent)
+        self.setObjectName("AdminView")
         self._busy_cursor = False
+
         self.tabs = QtWidgets.QTabWidget(self)
 
         lay = QtWidgets.QVBoxLayout(self)
         lay.setContentsMargins(12, 12, 12, 12)
         lay.addWidget(self.tabs)
 
+        # Pestañas existentes
         self._init_tab_categorias()
-        self._init_tab_reportes()
+        self._init_tab_ventas()
         self._init_tab_movimientos()
-        self._init_tab_usuarios() 
-
+        self._init_tab_usuarios()
 
     # CATEGORÍAS
 
@@ -36,6 +38,7 @@ class AdminView(QtWidgets.QWidget):
         self.btn_cat_reload = QtWidgets.QPushButton("Recargar")
         self.btn_cat_new = QtWidgets.QPushButton("Nueva")
         self.btn_cat_del = QtWidgets.QPushButton("Eliminar")
+        self.btn_cat_del.setObjectName("dangerButton")
         toolbar.addWidget(self.btn_cat_reload)
         toolbar.addSpacing(12)
         toolbar.addWidget(self.btn_cat_new)
@@ -71,11 +74,9 @@ class AdminView(QtWidgets.QWidget):
         self.btn_cat_reload.clicked.connect(self._cat_load)
         self.btn_cat_new.clicked.connect(self._cat_new)
         self.btn_cat_del.setEnabled(False)
-        sel_model = self.cat_table.selectionModel()
-        if sel_model:
-            sel_model.selectionChanged.connect(
-                lambda *_: self.btn_cat_del.setEnabled(self.cat_table.currentIndex().isValid())
-            )
+        self.cat_table.selectionModel().selectionChanged.connect(
+            lambda *_: self.btn_cat_del.setEnabled(self.cat_table.currentIndex().isValid())
+        )
         self.btn_cat_del.clicked.connect(self._cat_delete)
         self.cat_table.doubleClicked.connect(lambda _=None: None)
 
@@ -139,72 +140,237 @@ class AdminView(QtWidgets.QWidget):
         QtWidgets.QMessageBox.information(self, "Categorías", msg or "Categoría eliminada.")
         self._cat_load()
 
+    # VENTAS
 
-    # REPORTES
-
-    def _init_tab_reportes(self):
-        w = QtWidgets.QWidget()
+    def _init_tab_ventas(self):
+        """Crea la pestaña 'Ventas' y consume GET /ListadoVentas con filtros."""
+        w = QtWidgets.QWidget(self)
         v = QtWidgets.QVBoxLayout(w)
         v.setContentsMargins(8, 8, 8, 8)
+        v.setSpacing(8)
 
-        top = QtWidgets.QHBoxLayout()
-        self.periodo = QtWidgets.QComboBox()
-        self.periodo.addItems(["Diario", "Semanal", "Mensual"])
-        self.desde = QtWidgets.QDateEdit(QtCore.QDate.currentDate())
-        self.hasta = QtWidgets.QDateEdit(QtCore.QDate.currentDate())
-        for de in (self.desde, self.hasta):
-            de.setCalendarPopup(True)
-            de.setDisplayFormat("yyyy-MM-dd")
-        self.btn_generar = QtWidgets.QPushButton("Generar")
-        self.btn_export = QtWidgets.QPushButton("Exportar CSV")
-        top.addWidget(QtWidgets.QLabel("Periodo:"))
-        top.addWidget(self.periodo)
-        top.addSpacing(12)
-        top.addWidget(QtWidgets.QLabel("Desde:"))
-        top.addWidget(self.desde)
-        top.addWidget(QtWidgets.QLabel("Hasta:"))
-        top.addWidget(self.hasta)
-        top.addStretch(1)
-        top.addWidget(self.btn_generar)
-        top.addWidget(self.btn_export)
+        # --------- Filtros ---------
+        filtros = QtWidgets.QHBoxLayout()
+        filtros.setSpacing(8)
 
-        self.rep_table = QtWidgets.QTableView()
-        self.rep_table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
-        self.rep_table.setSelectionMode(QtWidgets.QAbstractItemView.SingleSelection)
-        self.rep_table.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
-        self.rep_table.horizontalHeader().setStretchLastSection(True)
-        self.rep_table.verticalHeader().setVisible(False)
+        lbl_desde = QtWidgets.QLabel("Desde:")
+        self.dt_desde = QtWidgets.QDateEdit()
+        self.dt_desde.setCalendarPopup(True)
+        self.dt_desde.setDisplayFormat("yyyy-MM-dd")
+        self.dt_desde.setDate(QtCore.QDate.currentDate().addMonths(-1))  # último mes
 
-        v.addLayout(top)
-        v.addWidget(self.rep_table, 1)
-        self.tabs.addTab(w, "Reportes")
+        lbl_hasta = QtWidgets.QLabel("Hasta:")
+        self.dt_hasta = QtWidgets.QDateEdit()
+        self.dt_hasta.setCalendarPopup(True)
+        self.dt_hasta.setDisplayFormat("yyyy-MM-dd")
+        self.dt_hasta.setDate(QtCore.QDate.currentDate())
 
-        self.rep_model = QtGui.QStandardItemModel(self)
-        self.rep_model.setHorizontalHeaderLabels(["Periodo", "Transacciones", "Total"])
-        self.rep_table.setModel(self.rep_model)
+        self.txt_buscar_ventas = QtWidgets.QLineEdit()
+        self.txt_buscar_ventas.setPlaceholderText("Buscar: transacción, vendedor o producto…")
 
-        self.btn_generar.clicked.connect(self._generar_reporte)
-        self.btn_export.clicked.connect(self._exportar_csv)
+        self.btn_filtrar_ventas = QtWidgets.QPushButton("Buscar")
+        self.btn_limpiar_ventas = QtWidgets.QPushButton("Limpiar")
 
-        self._generar_reporte()
+        filtros.addWidget(lbl_desde)
+        filtros.addWidget(self.dt_desde)
+        filtros.addSpacing(6)
+        filtros.addWidget(lbl_hasta)
+        filtros.addWidget(self.dt_hasta)
+        filtros.addSpacing(12)
+        filtros.addWidget(self.txt_buscar_ventas, 1)
+        filtros.addWidget(self.btn_filtrar_ventas)
+        filtros.addWidget(self.btn_limpiar_ventas)
 
-    def _generar_reporte(self):
-        self.rep_model.removeRows(0, self.rep_model.rowCount())
+        v.addLayout(filtros)
 
-    def _money_item(self, v: int) -> QtGui.QStandardItem:
-        it = QtGui.QStandardItem(f"${v:,}".replace(",", "."))
-        it.setTextAlignment(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter)
-        return it
+        # --------- Tabla ---------
+        cols = [
+            "Fecha", "Hora", "Venta ID", "Transacción", "Vendedor",
+            "Producto", "Cantidad", "Precio", "Precio c/IVA", "Subtotal", "Total venta"
+        ]
+        self.model_ventas = QtGui.QStandardItemModel(0, len(cols), self)
+        self.model_ventas.setHorizontalHeaderLabels(cols)
 
-    def _exportar_csv(self):
-        if self.rep_model.rowCount() == 0:
-            QtWidgets.QMessageBox.information(self, "Exportar", "No hay datos para exportar.")
+        self.proxy_ventas = QtCore.QSortFilterProxyModel(self)
+        self.proxy_ventas.setSourceModel(self.model_ventas)
+        self.proxy_ventas.setFilterCaseSensitivity(QtCore.Qt.CaseInsensitive)
+        self.proxy_ventas.setFilterKeyColumn(-1)
+
+        self.tbl_ventas = QtWidgets.QTableView(self)
+        self.tbl_ventas.setModel(self.proxy_ventas)
+        self.tbl_ventas.setSortingEnabled(True)
+        self.tbl_ventas.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
+        self.tbl_ventas.setSelectionMode(QtWidgets.QAbstractItemView.SingleSelection)
+        self.tbl_ventas.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
+        self.tbl_ventas.verticalHeader().setVisible(False)
+        v.addWidget(self.tbl_ventas)
+
+        hdr = self.tbl_ventas.horizontalHeader()
+        hdr.setStretchLastSection(False)
+        hdr.setSectionResizeMode(0, QtWidgets.QHeaderView.ResizeToContents)   # Fecha
+        hdr.setSectionResizeMode(1, QtWidgets.QHeaderView.ResizeToContents)   # Hora
+        hdr.setSectionResizeMode(2, QtWidgets.QHeaderView.ResizeToContents)   # Venta ID
+        hdr.setSectionResizeMode(3, QtWidgets.QHeaderView.Stretch)            # Transacción
+        hdr.setSectionResizeMode(4, QtWidgets.QHeaderView.ResizeToContents)   # Vendedor
+        hdr.setSectionResizeMode(5, QtWidgets.QHeaderView.Stretch)            # Producto
+        hdr.setSectionResizeMode(6, QtWidgets.QHeaderView.ResizeToContents)   # Cantidad
+        hdr.setSectionResizeMode(7, QtWidgets.QHeaderView.ResizeToContents)   # Precio
+        hdr.setSectionResizeMode(8, QtWidgets.QHeaderView.ResizeToContents)   # Precio c/IVA
+        hdr.setSectionResizeMode(9, QtWidgets.QHeaderView.ResizeToContents)   # Subtotal
+        hdr.setSectionResizeMode(10, QtWidgets.QHeaderView.ResizeToContents)  # Total venta
+
+        self.lbl_ventas_status = QtWidgets.QLabel("")
+        v.addWidget(self.lbl_ventas_status)
+
+        # --------- Conexiones filtros ---------
+        self.btn_filtrar_ventas.clicked.connect(self._buscar_ventas)
+        self.btn_limpiar_ventas.clicked.connect(self._limpiar_filtros_ventas)
+        self.txt_buscar_ventas.textChanged.connect(self._aplicar_filtro_texto_ventas)
+
+        # --------- Thread/Worker y flag de ocupación ---------
+        self._ventas_thread: Optional[QtCore.QThread] = None
+        self._ventas_worker: Optional[QtCore.QObject] = None
+        self._ventas_busy: bool = False
+
+        self.tabs.addTab(w, "Ventas")
+
+        # Primera carga
+        self._buscar_ventas()
+
+    # --- Ventas: filtros ---
+    def _limpiar_filtros_ventas(self):
+        self.dt_desde.setDate(QtCore.QDate.currentDate().addMonths(-1))
+        self.dt_hasta.setDate(QtCore.QDate.currentDate())
+        self.txt_buscar_ventas.clear()
+        self._buscar_ventas()
+
+    def _aplicar_filtro_texto_ventas(self, text: str):
+        self.proxy_ventas.setFilterFixedString((text or "").strip())
+
+    # --- Ventas: formatos ---
+    def _fmt_money(self, v: int) -> str:
+        try:
+            return f"{int(v):,}".replace(",", ".")
+        except Exception:
+            return str(v)
+
+    def _fmt_hora_hhmmss(self, seconds: int) -> str:
+        try:
+            seconds = int(seconds)
+            h = seconds // 3600
+            m = (seconds % 3600) // 60
+            s = seconds % 60
+            return f"{h:02d}:{m:02d}:{s:02d}"
+        except Exception:
+            return str(seconds)
+
+    def _buscar_ventas(self):
+        if self._ventas_busy:
             return
-        path, _ = QtWidgets.QFileDialog.getSaveFileName(self, "Exportar CSV", "reporte.csv", "CSV (*.csv)")
-        if not path:
+        self._ventas_busy = True
+
+        start = self.dt_desde.date().toString("yyyy-MM-dd")
+        end = self.dt_hasta.date().toString("yyyy-MM-dd")
+        self.lbl_ventas_status.setText("Cargando ventas…")
+
+        class _VentasWorker(QtCore.QObject):
+            finished = QtCore.Signal(list, str)  # (items, err)
+
+            def __init__(self, client: ApiClient, start_date: str | None, end_date: str | None):
+                super().__init__()
+                self.client = client
+                self.start_date = start_date
+                self.end_date = end_date
+
+            @QtCore.Slot()
+            def run(self):
+                try:
+                    path = "/ListadoVentas"
+                    params = []
+                    if self.start_date:
+                        params.append(f"start_date={self.start_date}")
+                    if self.end_date:
+                        params.append(f"end_date={self.end_date}")
+                    if params:
+                        path = f"{path}?{'&'.join(params)}"
+
+                    res = self.client.get_json(path)
+                    if isinstance(res, dict) and isinstance(res.get("Ventas"), list):
+                        self.finished.emit(res["Ventas"], "")
+                    else:
+                        self.finished.emit([], "Formato inesperado de respuesta.")
+                except Exception as e:
+                    self.finished.emit([], str(e))
+
+        # Crea hilo y worker nuevos para cada búsqueda
+        self._ventas_thread = QtCore.QThread(self)
+        self._ventas_worker = _VentasWorker(ApiClient(), start, end)
+        self._ventas_worker.moveToThread(self._ventas_thread)
+
+        # Conexiones
+        self._ventas_thread.started.connect(self._ventas_worker.run)
+        self._ventas_worker.finished.connect(self._on_ventas_loaded)
+        self._ventas_worker.finished.connect(self._ventas_thread.quit)
+        self._ventas_worker.finished.connect(self._ventas_worker.deleteLater)
+        self._ventas_thread.finished.connect(self._ventas_thread.deleteLater)
+        self._ventas_thread.finished.connect(self._ventas_clear_refs)
+
+        self._ventas_thread.start()
+
+    @QtCore.Slot()
+    def _ventas_clear_refs(self):
+        self._ventas_thread = None
+        self._ventas_worker = None
+        self._ventas_busy = False
+
+    @QtCore.Slot(list, str)
+    def _on_ventas_loaded(self, rows: List[dict], err: str):
+        self._ventas_busy = False
+
+        if err:
+            self.lbl_ventas_status.setText(f"Error: {err}")
+            QtWidgets.QMessageBox.warning(self, "Ventas", err)
             return
-        exportar_csv(self.rep_model, path)
-        QtWidgets.QMessageBox.information(self, "Exportar", "Archivo CSV exportado correctamente.")
+
+        self.model_ventas.removeRows(0, self.model_ventas.rowCount())
+
+        # Una fila por producto (una venta puede traer múltiples items)
+        for r in rows:
+            fecha = str(r.get("fecha") or "")
+            hora = self._fmt_hora_hhmmss(r.get("hora") or 0)
+            venta_id = str(r.get("venta_id") or "")
+            trans = str(r.get("transaccion") or "")
+            vendedor = str(r.get("vendedor") or "") 
+            producto = str(r.get("producto") or "")
+            cantidad = int(r.get("cantidad") or 0)
+            precio = int(r.get("precio") or 0)
+            precio_iva = int(r.get("precio_con_iva") or 0)
+            subtotal = int(r.get("subtotal") or 0)
+            total_venta = int(r.get("total_venta") or 0)
+
+            items = [
+                QtGui.QStandardItem(fecha),
+                QtGui.QStandardItem(hora),
+                QtGui.QStandardItem(venta_id),
+                QtGui.QStandardItem(trans),
+                QtGui.QStandardItem(vendedor),
+                QtGui.QStandardItem(producto),
+                QtGui.QStandardItem(str(cantidad)),
+                QtGui.QStandardItem(self._fmt_money(precio)),
+                QtGui.QStandardItem(self._fmt_money(precio_iva)),
+                QtGui.QStandardItem(self._fmt_money(subtotal)),
+                QtGui.QStandardItem(self._fmt_money(total_venta)),
+            ]
+            for idx in (6, 7, 8, 9, 10):
+                items[idx].setTextAlignment(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter)
+
+            self.model_ventas.appendRow(items)
+
+        self.lbl_ventas_status.setText(
+            f"Filas: {self.model_ventas.rowCount()}  (una fila por producto dentro de cada venta)"
+        )
+
+    # MOVIMIENTOS
 
     def _init_tab_movimientos(self):
         w = QtWidgets.QWidget()
@@ -244,8 +410,7 @@ class AdminView(QtWidgets.QWidget):
     def _mov_apply_filter(self):
         aplicar_filtro_movimientos(self.mov_table, self.mov_model, self.mov_filter.text())
 
-
-    # USUARIOS 
+    # USUARIOS
 
     def _init_tab_usuarios(self):
         w = QtWidgets.QWidget()
@@ -307,7 +472,7 @@ class AdminView(QtWidgets.QWidget):
 
             uid = u.get("id", "")
             nombre = u.get("nombre", "")
-            rol = u.get("rol", "")  
+            rol = u.get("rol", "")
 
             self.tbl_usuarios.setItem(row, 0, QtWidgets.QTableWidgetItem(str(uid)))
             self.tbl_usuarios.setItem(row, 1, QtWidgets.QTableWidgetItem(str(nombre)))
@@ -331,7 +496,6 @@ class AdminView(QtWidgets.QWidget):
         except Exception:
             return None
 
-
     def _on_edit_user_name(self):
         user_id = self._get_selected_user_id()
         if not user_id:
@@ -344,17 +508,13 @@ class AdminView(QtWidgets.QWidget):
             return
         self._usr_svc.actualizar_nombre(user_id, new_name.strip())
 
-
     def _on_edit_user_pwd(self):
         user_id = self._get_selected_user_id()
         if not user_id:
             QtWidgets.QMessageBox.information(self, "Usuarios", "Selecciona un usuario primero.")
             return
         new_pwd, ok = QtWidgets.QInputDialog.getText(
-            self,
-            "Cambiar contraseña",
-            "Nueva contraseña:",
-            echo=QtWidgets.QLineEdit.Password
+            self, "Cambiar contraseña", "Nueva contraseña:", echo=QtWidgets.QLineEdit.Password
         )
         if not ok or not new_pwd:
             return
@@ -373,6 +533,8 @@ class AdminView(QtWidgets.QWidget):
                 return
             self._usr_svc.crear(payload)
 
+    # Busy cursor
+
     def _set_busy(self, busy: bool):
         if busy and not getattr(self, "_busy_cursor", False):
             QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.WaitCursor)
@@ -381,6 +543,7 @@ class AdminView(QtWidgets.QWidget):
             QtWidgets.QApplication.restoreOverrideCursor()
             self._busy_cursor = False
 
+# Diálogos
 
 class CategoriaDialog(QtWidgets.QDialog):
     def __init__(self, parent: Optional[QtWidgets.QWidget] = None,
@@ -472,9 +635,6 @@ class CategoryCreateDialog(QtWidgets.QDialog):
         return self.name.text()
 
 
-
-# Diálogo NUEVO usuario
-
 class NewUserDialog(QtWidgets.QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -492,7 +652,7 @@ class NewUserDialog(QtWidgets.QDialog):
 
         layout.addRow("Nombre:", self.txt_nombre)
         layout.addRow("Contraseña:", self.txt_contrasena)
-        layout.addRow("Rol:", self.cbo_rol) 
+        layout.addRow("Rol:", self.cbo_rol)
 
         btns = QtWidgets.QDialogButtonBox(
             QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel
@@ -503,7 +663,7 @@ class NewUserDialog(QtWidgets.QDialog):
 
     def get_payload(self) -> dict:
         from datetime import datetime
-        rol_id = self.cbo_rol.currentData() 
+        rol_id = self.cbo_rol.currentData()
         return {
             "nombre": self.txt_nombre.text().strip(),
             "contrasena": self.txt_contrasena.text(),

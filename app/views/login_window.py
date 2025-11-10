@@ -9,7 +9,7 @@ from app.funciones.rol import normalize_role
 
 
 class LoginWindow(QtWidgets.QMainWindow):
-    login_success = QtCore.Signal(str, str)  # username, role (normalized)
+    login_success = QtCore.Signal(str, str)  # username, role normalized
     DEFAULT_ROLE = "Cajero"
 
     def __init__(self, app_version: str = "", parent: Optional[QtWidgets.QWidget] = None):
@@ -60,21 +60,25 @@ class LoginWindow(QtWidgets.QMainWindow):
         form_layout.addRow("Usuario:", self.username)
         form_layout.addRow("Contraseña:", self.password)
 
-        # Mensaje de error (debajo de la tarjeta)
+        # Mensaje de error
         self.error_label = QtWidgets.QLabel("")
         self.error_label.setObjectName("errorLabel")
         self.error_label.setWordWrap(True)
         self.error_label.setVisible(False)
 
-        # Botones
+        # Botones (aquí agregamos Vincular)
         btn_row = QtWidgets.QHBoxLayout()
+        self.link_btn = QtWidgets.QPushButton("Vincular") 
+        self.link_btn.clicked.connect(self._on_link_clicked)
+        btn_row.addWidget(self.link_btn)  
+
         btn_row.addStretch(1)
+        self.exit_btn = QtWidgets.QPushButton("Salir")
+        self.exit_btn.clicked.connect(self.close)
         self.login_btn = QtWidgets.QPushButton("Ingresar")
         self.login_btn.setObjectName("primaryButton")
         self.login_btn.setDefault(True)
         self.login_btn.clicked.connect(self.on_login_clicked)
-        self.exit_btn = QtWidgets.QPushButton("Salir")
-        self.exit_btn.clicked.connect(self.close)
         btn_row.addWidget(self.exit_btn)
         btn_row.addWidget(self.login_btn)
 
@@ -84,12 +88,12 @@ class LoginWindow(QtWidgets.QMainWindow):
         inner_layout.addLayout(btn_row)
         root.addLayout(inner_layout)
 
-        # Barra inferior 
+        # Barra inferior (versión + LED estado + texto)
         status_bar = QtWidgets.QHBoxLayout()
         status_bar.addStretch(1)
 
         version_label = QtWidgets.QLabel(f"Versión {self._app_version}") if self._app_version else QtWidgets.QLabel("")
-        self.api_led = LedIndicator(12, self)  # LED rojo/verde
+        self.api_led = LedIndicator(12, self)
         self.api_led.setToolTip("Estado de conexión a la API")
         self.status_text = QtWidgets.QLabel("Desconectado")
 
@@ -100,12 +104,12 @@ class LoginWindow(QtWidgets.QMainWindow):
         root.addStretch(1)
         root.addLayout(status_bar)
 
-        # Atajos (como en tu versión original)
+        # Atajos
         QtGui.QShortcut(QtGui.QKeySequence("Return"), self, self.on_login_clicked)
         QtGui.QShortcut(QtGui.QKeySequence("Enter"), self, self.on_login_clicked)
         QtGui.QShortcut(QtGui.QKeySequence("Esc"), self, self.close)
 
-        # ---------- Monitor de API ----------
+        # Monitor de API
         self._api_monitor = ApiMonitor(ApiClient(), self, interval_ms=15000)
         self._api_monitor.onlineChanged.connect(self.api_led.set_state)
         self._api_monitor.onlineChanged.connect(self._on_api_online_changed)
@@ -125,9 +129,40 @@ class LoginWindow(QtWidgets.QMainWindow):
         authenticator.setUser("")
         authenticator.setPassword("")
 
+    # ----------Vincular ----------
+    def _on_link_clicked(self):
+        dlg = QtWidgets.QDialog(self)
+        dlg.setWindowTitle("Vincular dispositivo")
+        lay = QtWidgets.QFormLayout(dlg)
+        email_edit = QtWidgets.QLineEdit()
+        email_edit.setPlaceholderText("correo@ejemplo.com")
+        code_edit = QtWidgets.QLineEdit()
+        code_edit.setPlaceholderText("Código de vinculación")
+        lay.addRow("Correo:", email_edit)
+        lay.addRow("Código:", code_edit)
+
+        btns = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel,
+            parent=dlg
+        )
+        btns.button(QtWidgets.QDialogButtonBox.Ok).setText("Aceptar")
+        btns.button(QtWidgets.QDialogButtonBox.Cancel).setText("Cancelar")
+        btns.accepted.connect(dlg.accept)
+        btns.rejected.connect(dlg.reject)
+        lay.addRow(btns)
+
+        if dlg.exec() == QtWidgets.QDialog.Accepted:
+            correo = email_edit.text().strip()
+            codigo = code_edit.text().strip()
+            # por ahora solo lo mostramos / guardamos localmente
+            QtWidgets.QMessageBox.information(
+                self,
+                "Vincular",
+                f"Correo: {correo or '(vacío)'}\nCódigo: {codigo or '(vacío)'}\n\n(Aquí después llamamos a la API.)"
+            )
+
     # ---------- Acción de login ----------
     def on_login_clicked(self):
-        # Evitar múltiples solicitudes en paralelo
         if self._pending_reply is not None:
             self._show_error("Ya hay una autenticación en curso. Espera un momento…")
             return
@@ -150,7 +185,6 @@ class LoginWindow(QtWidgets.QMainWindow):
         prev_status = self.status_text.text()
         self.status_text.setText("Conectando...")
 
-        # Petición HTTP
         client = ApiClient()
         req = QtNetwork.QNetworkRequest(QtCore.QUrl(f"{client.base_url}/login"))
         req.setRawHeader(b"Content-Type", b"application/json")
@@ -160,7 +194,6 @@ class LoginWindow(QtWidgets.QMainWindow):
         reply = self._nam.post(req, json.dumps(payload).encode("utf-8"))
         self._pending_reply = reply
 
-        # Timeout de seguridad
         timer = QtCore.QTimer(self)
         timer.setSingleShot(True)
         timer.setInterval(max(5000, client.timeout * 1000))
@@ -178,11 +211,9 @@ class LoginWindow(QtWidgets.QMainWindow):
             reply.deleteLater()
             self._pending_reply = None
 
-            # Restaurar UI
             self.login_btn.setEnabled(True)
             self.status_text.setText(prev_status if prev_status else "Desconectado")
 
-            # Errores de red “duros” (host caído, timeout, etc.): mostrar tal cual
             if net_err != QtNetwork.QNetworkReply.NetworkError.NoError and status_code not in (400, 401, 403, 422):
                 return self._show_error(err_str or "Error de red")
 
@@ -191,7 +222,6 @@ class LoginWindow(QtWidgets.QMainWindow):
             except Exception:
                 res = {"detail": raw.decode("utf-8", errors="ignore")}
 
-            # Compatibilidad con ApiClient.post_json
             def _get_status_code(resp: Any) -> int:
                 if not isinstance(resp, dict):
                     return status_code or 200
@@ -227,12 +257,9 @@ class LoginWindow(QtWidgets.QMainWindow):
                                 break
 
             role_name = normalize_role(role_raw, default=self.DEFAULT_ROLE)
-
-            # Éxito: mostrar estado y emitir señal
             self.error_label.setVisible(False)
             self.status_text.setText("Conectado")
             self.login_success.emit(user, role_name)
-            print(f"[Login] Usuario '{user}' autenticado. Rol: {role_name}")
 
         reply.finished.connect(_finish)
         timer.start()

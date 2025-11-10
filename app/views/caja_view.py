@@ -288,6 +288,7 @@ class CajaView(QtWidgets.QWidget):
     def _on_api_ok(self, items: List[dict]):
         self.model_catalogo.removeRows(0, self.model_catalogo.rowCount())
         self._products_by_id.clear()
+
         for p in items:
             pid = str(p.get("id", ""))
             name = str(p.get("nombre", ""))
@@ -295,19 +296,41 @@ class CajaView(QtWidgets.QWidget):
             price = int(p.get("precio") or 0)
             stock = int(p.get("stock") or 0)
 
+            # no mostrar productos sin stock
+            if stock <= 0:
+                continue
+
             row_items: list[QtGui.QStandardItem] = []
             for i, val in enumerate((pid, name, cat, self._fmt_money(price), stock)):
                 it = QtGui.QStandardItem(str(val))
                 if i == 0:
-                    it.setData({"id": pid, "nombre": name, "categoria": cat, "precio": price, "stock": stock}, USER_ROLE_PRODUCT)
+                    it.setData(
+                        {
+                            "id": pid,
+                            "nombre": name,
+                            "categoria": cat,
+                            "precio": price,
+                            "stock": stock,
+                        },
+                        USER_ROLE_PRODUCT,
+                    )
                 if i in (3, 4):
                     it.setTextAlignment(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter)
                 row_items.append(it)
+
             self.model_catalogo.appendRow(row_items)
-            self._products_by_id[pid] = {"id": pid, "nombre": name, "categoria": cat, "precio": price, "stock": stock}
+            # solo guardamos los que sí se muestran
+            self._products_by_id[pid] = {
+                "id": pid,
+                "nombre": name,
+                "categoria": cat,
+                "precio": price,
+                "stock": stock,
+            }
 
         n = self.model_catalogo.rowCount()
         self.lbl_status_catalogo.setText(f"{n} producto(s) disponible(s)")
+
 
     # ------------------- Carrito -------------------
     def _agregar_seleccionado(self):
@@ -459,7 +482,7 @@ class CajaView(QtWidgets.QWidget):
 
     def _generar_json_venta(self, usuario: str, metodo_pago: str):
         # Generar JSON 
-        json_str = generate_sale_json(self.model_carrito, usuario)
+        json_str = generate_sale_json(self.model_carrito, usuario, metodo_pago=metodo_pago)
         self._last_sale_json = json_str
 
         print("[CajaView] Venta (JSON):", json_str)

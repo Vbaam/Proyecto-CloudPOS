@@ -14,7 +14,11 @@ def total_carrito(model: QtGui.QStandardItemModel) -> int:
         total += parse_money(model.item(r, 5).text())
     return total
 
-def generate_sale_json(model: QtGui.QStandardItemModel, usuario: str = "Desconocido") -> str:
+def generate_sale_json(
+    model: QtGui.QStandardItemModel,
+    usuario: str = "Desconocido",
+    metodo_pago: str = ""
+) -> str:
     items = []
     total = 0
     for r in range(model.rowCount()):
@@ -25,11 +29,13 @@ def generate_sale_json(model: QtGui.QStandardItemModel, usuario: str = "Desconoc
         cantidad_item = model.item(r, 4)
         subtotal_item = model.item(r, 5)
 
-        pid = pid_item.text() if pid_item is not None else ""
+        pid_text = pid_item.text() if pid_item is not None else ""
+        pid = int(pid_text) if pid_text.isdigit() else pid_text
+
         producto = producto_item.text() if producto_item is not None else ""
         precio = parse_money(precio_item.text()) if precio_item is not None else 0
         precio_con_iva = parse_money(precio_con_iva_item.text()) if precio_con_iva_item is not None else 0
-        cantidad = int(cantidad_item.text()) if cantidad_item is not None and cantidad_item.text().isdigit() else 0
+        cantidad = int(cantidad_item.text()) if (cantidad_item is not None and cantidad_item.text().isdigit()) else 0
         subtotal = parse_money(subtotal_item.text()) if subtotal_item is not None else 0
 
         total += subtotal
@@ -50,7 +56,8 @@ def generate_sale_json(model: QtGui.QStandardItemModel, usuario: str = "Desconoc
     payload = {
         "fecha": fecha,
         "hora": hora,
-        "usuario": usuario, 
+        "usuario": usuario,
+        "metodo_pago": metodo_pago,
         "total": total,
         "items": items,
     }
