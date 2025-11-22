@@ -28,6 +28,8 @@ def validar_nombre_categoria(nombre: str) -> Optional[str]:
         return "La categoría es obligatoria."
     if len(n) > 80:
         return "La categoría no debe exceder 80 caracteres."
+    if not n[0].isupper():
+        return "La primera letra de la categoría debe estar en mayúscula (ej: 'Electrónica')."
     return None
 
 

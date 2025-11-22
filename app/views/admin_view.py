@@ -1,4 +1,3 @@
-# app/views/admin_view.py
 from __future__ import annotations
 from typing import Optional, Tuple, List
 from PySide6 import QtCore, QtGui, QtWidgets
@@ -98,7 +97,11 @@ class AdminView(QtWidgets.QWidget):
             self._cat_svc.crear_categoria(nombre)
 
     def _cat_on_created(self, msg: str):
-        QtWidgets.QMessageBox.information(self, "Categorías", msg or "Categoría creada correctamente.")
+        QtWidgets.QMessageBox.information(
+            self,
+            "Categorías",
+            f'Se ha creado la categoría correctamente.'
+        )
         self._cat_load()
 
     def _cat_on_error(self, msg: str):
@@ -661,12 +664,12 @@ class NewUserDialog(QtWidgets.QDialog):
         btns.rejected.connect(self.reject)
         layout.addRow(btns)
 
-    def get_payload(self) -> dict:
-        from datetime import datetime
-        rol_id = self.cbo_rol.currentData()
-        return {
-            "nombre": self.txt_nombre.text().strip(),
-            "contrasena": self.txt_contrasena.text(),
-            "rol_id": int(rol_id),
-            "fecha": datetime.now().isoformat()
-        }
+        def get_payload(self) -> dict:
+            from datetime import datetime
+            rol_id = self.cbo_rol.currentData()
+            return {
+                "nombre": self.txt_nombre.text().strip(),
+                "contrasena": self.txt_contrasena.text(),
+                "rol_id": int(rol_id),
+                "fecha": datetime.now().isoformat()
+            }

@@ -1,7 +1,9 @@
+from __future__ import annotations
 from typing import Optional, Any
 from PySide6 import QtCore, QtGui, QtWidgets, QtNetwork
 import hashlib
 import json
+from datetime import datetime
 
 from app.servicios.api import ApiClient
 from app.servicios.api_monitor import ApiMonitor, LedIndicator
@@ -18,7 +20,17 @@ class LoginWindow(QtWidgets.QMainWindow):
         self.setWindowTitle("CloudPOS — Inicio de sesión")
         self.setMinimumSize(520, 420)
 
-        # --- Red asíncrona ---
+        if not QtCore.QCoreApplication.organizationName():
+            QtCore.QCoreApplication.setOrganizationName("CloudPOS")
+        if not QtCore.QCoreApplication.applicationName():
+            QtCore.QCoreApplication.setApplicationName("CloudPOS")
+        if self._app_version:
+            QtCore.QCoreApplication.setApplicationVersion(self._app_version)
+
+        # Token de vinculación (para /login). No persistente.
+        self.link_token: Optional[str] = None
+
+        # --- Red asíncrona para login ---
         self._nam = QtNetwork.QNetworkAccessManager(self)
         self._nam.authenticationRequired.connect(self._ignore_auth)
         self._pending_reply: Optional[QtNetwork.QNetworkReply] = None
@@ -66,11 +78,12 @@ class LoginWindow(QtWidgets.QMainWindow):
         self.error_label.setWordWrap(True)
         self.error_label.setVisible(False)
 
-        # Botones (aquí agregamos Vincular)
+        # Botones (Vincular a la izquierda)
         btn_row = QtWidgets.QHBoxLayout()
-        self.link_btn = QtWidgets.QPushButton("Vincular") 
+        self.link_btn = QtWidgets.QPushButton("Vincular")
+        self.link_btn.setToolTip("Vincular cliente mediante correo y código")
         self.link_btn.clicked.connect(self._on_link_clicked)
-        btn_row.addWidget(self.link_btn)  
+        btn_row.addWidget(self.link_btn) 
 
         btn_row.addStretch(1)
         self.exit_btn = QtWidgets.QPushButton("Salir")
@@ -109,7 +122,10 @@ class LoginWindow(QtWidgets.QMainWindow):
         QtGui.QShortcut(QtGui.QKeySequence("Enter"), self, self.on_login_clicked)
         QtGui.QShortcut(QtGui.QKeySequence("Esc"), self, self.close)
 
-        # Monitor de API
+        # Persistencia: limpiar cred guardadas si cambia de versión
+        self._init_link_persistence()
+
+        # Monitor de API (LED)
         self._api_monitor = ApiMonitor(ApiClient(), self, interval_ms=15000)
         self._api_monitor.onlineChanged.connect(self.api_led.set_state)
         self._api_monitor.onlineChanged.connect(self._on_api_online_changed)
@@ -129,17 +145,64 @@ class LoginWindow(QtWidgets.QMainWindow):
         authenticator.setUser("")
         authenticator.setPassword("")
 
-    # ----------Vincular ----------
+    # ---------- Persistencia de Vincular (QSettings) ----------
+    def _init_link_persistence(self):
+        """Al cambiar la versión de la app, borra correo/código guardados."""
+        settings = QtCore.QSettings()
+        stored_version = settings.value("app/version", "", type=str)
+        current_version = self._app_version or "dev"
+        if stored_version and stored_version != current_version:
+            settings.remove("link")
+        settings.setValue("app/version", current_version)
+
+    def _load_link_saved(self) -> tuple[str, str]:
+        """Lee correo y código guardados (si existen)."""
+        settings = QtCore.QSettings()
+        email = settings.value("link/email", "", type=str) or ""
+        code = settings.value("link/code", "", type=str) or ""
+        return email, code
+
+    def _save_link_saved(self, correo: str, codigo: str, remember: bool):
+        """Guarda o limpia correo/código, según el checkbox."""
+        settings = QtCore.QSettings()
+        if remember:
+            settings.setValue("link/email", correo or "")
+            settings.setValue("link/code", codigo or "")
+        else:
+            settings.remove("link/email")
+            settings.remove("link/code")
+
+    # ---------- Vincular ----------
     def _on_link_clicked(self):
         dlg = QtWidgets.QDialog(self)
-        dlg.setWindowTitle("Vincular dispositivo")
+        dlg.setWindowTitle("Vincular cliente")
+        dlg.setModal(True)
         lay = QtWidgets.QFormLayout(dlg)
+        lay.setContentsMargins(16, 16, 16, 16)
+
         email_edit = QtWidgets.QLineEdit()
         email_edit.setPlaceholderText("correo@ejemplo.com")
+        email_edit.setClearButtonEnabled(True)
+
         code_edit = QtWidgets.QLineEdit()
         code_edit.setPlaceholderText("Código de vinculación")
+        code_edit.setClearButtonEnabled(True)
+        code_edit.setEchoMode(QtWidgets.QLineEdit.Password)
+
+        remember_chk = QtWidgets.QCheckBox("Guardar correo y código en este equipo")
+
+        # Prellenar si ya estaba guardado
+        saved_email, saved_code = self._load_link_saved()
+        if saved_email:
+            email_edit.setText(saved_email)
+            remember_chk.setChecked(True)
+        if saved_code:
+            code_edit.setText(saved_code)
+            remember_chk.setChecked(True)
+
         lay.addRow("Correo:", email_edit)
         lay.addRow("Código:", code_edit)
+        lay.addRow("", remember_chk)
 
         btns = QtWidgets.QDialogButtonBox(
             QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel,
@@ -151,25 +214,77 @@ class LoginWindow(QtWidgets.QMainWindow):
         btns.rejected.connect(dlg.reject)
         lay.addRow(btns)
 
-        if dlg.exec() == QtWidgets.QDialog.Accepted:
-            correo = email_edit.text().strip()
-            codigo = code_edit.text().strip()
-            # por ahora solo lo mostramos / guardamos localmente
-            QtWidgets.QMessageBox.information(
-                self,
-                "Vincular",
-                f"Correo: {correo or '(vacío)'}\nCódigo: {codigo or '(vacío)'}\n\n(Aquí después llamamos a la API.)"
-            )
+        if dlg.exec() != QtWidgets.QDialog.Accepted:
+            return
 
-    # ---------- Acción de login ----------
+        correo = email_edit.text().strip()
+        codigo = code_edit.text().strip()
+        if not correo or not codigo:
+            QtWidgets.QMessageBox.information(self, "Vincular", "Debes ingresar Correo y Código.")
+            return
+
+        # Guarda/limpia según el checkbox
+        self._save_link_saved(correo, codigo, remember_chk.isChecked())
+
+        payload = {
+            "correo": correo,
+            "codigo": codigo,
+            "fecha": datetime.now().strftime("%Y-%m-%dT%H:%M:%S"),
+        }
+
+        client = ApiClient()
+        try:
+            QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.WaitCursor)
+            resp = client.post_json("/vincular", payload)
+            if isinstance(resp, dict) and resp.get("error"):
+                msg = resp.get("detail") or f"HTTP {resp.get('status', '')}"
+                QtWidgets.QMessageBox.warning(self, "Vincular", f"Error al vincular:\n{msg}")
+                return
+
+            token = None
+            if isinstance(resp, dict):
+                token = resp.get("token_vinculacion")
+            if not token:
+                QtWidgets.QMessageBox.warning(self, "Vincular", "La API no entregó un token de vinculación.")
+                return
+
+            # Guardar token de vinculación en memoria (no persistente)
+            self.link_token = token
+            app = QtWidgets.QApplication.instance()
+            if app is not None:
+                app.setProperty("link_token", token)
+
+            QtWidgets.QMessageBox.information(self, "Vincular", "Vinculación exitosa.\nToken almacenado (memoria).")
+        finally:
+            try:
+                QtWidgets.QApplication.restoreOverrideCursor()
+            except Exception:
+                pass
+
     def on_login_clicked(self):
         if self._pending_reply is not None:
             self._show_error("Ya hay una autenticación en curso. Espera un momento…")
             return
 
+        app = QtWidgets.QApplication.instance()
+        link_token = None
+        if app is not None:
+            link_token = app.property("link_token")
+        if not link_token:
+            link_token = self.link_token
+
+        if not link_token:
+            if QtWidgets.QMessageBox.question(
+                self, "Token requerido",
+                "Debes vincular tu cliente antes de iniciar sesión.\n¿Deseas vincular ahora?"
+            ) == QtWidgets.QMessageBox.Yes:
+                self._on_link_clicked()
+            else:
+                self._show_error("Falta token de vinculación. Usa el botón 'Vincular'.")
+            return
+
         user = self.username.text().strip()
         pwd = self.password.text() or ""
-
         if not user:
             return self._show_error("Ingresa tu usuario.")
         if not pwd:
@@ -189,6 +304,8 @@ class LoginWindow(QtWidgets.QMainWindow):
         req = QtNetwork.QNetworkRequest(QtCore.QUrl(f"{client.base_url}/login"))
         req.setRawHeader(b"Content-Type", b"application/json")
         req.setRawHeader(b"Accept", b"application/json")
+        # IMPORTANTE: /login usa el token de vinculación
+        req.setRawHeader(b"Authorization", f"Bearer {link_token}".encode("utf-8"))
 
         payload = {"nombre": user, "contrasena": hashed_pwd}
         reply = self._nam.post(req, json.dumps(payload).encode("utf-8"))
@@ -214,6 +331,7 @@ class LoginWindow(QtWidgets.QMainWindow):
             self.login_btn.setEnabled(True)
             self.status_text.setText(prev_status if prev_status else "Desconectado")
 
+            # Errores de red
             if net_err != QtNetwork.QNetworkReply.NetworkError.NoError and status_code not in (400, 401, 403, 422):
                 return self._show_error(err_str or "Error de red")
 
@@ -222,6 +340,33 @@ class LoginWindow(QtWidgets.QMainWindow):
             except Exception:
                 res = {"detail": raw.decode("utf-8", errors="ignore")}
 
+            # Token inválido/expirado en /login
+            if status_code in (401, 403):
+                return self._show_error("Token de vinculación inválido o expirado. Vuelve a 'Vincular' e inténtalo nuevamente.")
+
+            # ---- Extraer y guardar el token de sesión del LOGIN ----
+            login_token = None
+            if isinstance(res, dict):
+                keys = ("token", "access_token", "auth_token", "jwt", "bearer", "authorization",
+                        "Authorization", "token_login")
+                for k in keys:
+                    if k in res and res[k]:
+                        login_token = str(res[k]); break
+                if not login_token:
+                    data = res.get("data")
+                    if isinstance(data, dict):
+                        for k in keys:
+                            if k in data and data[k]:
+                                login_token = str(data[k]); break
+
+            if not login_token:
+                return self._show_error("El inicio de sesión no entregó token de sesión.")
+
+            # Guardar token de sesión en memoria para el resto de la app
+            if app is not None:
+                app.setProperty("auth_token", login_token)
+
+            # ---- Manejo de código/errores y rol ----
             def _get_status_code(resp: Any) -> int:
                 if not isinstance(resp, dict):
                     return status_code or 200
@@ -246,15 +391,13 @@ class LoginWindow(QtWidgets.QMainWindow):
             elif isinstance(res, dict):
                 for key in ("rol_id", "role_id", "id_rol", "rolid", "role", "rol"):
                     if key in res and res.get(key) is not None:
-                        role_raw = res.get(key)
-                        break
+                        role_raw = res.get(key); break
                 if role_raw is None:
                     userobj = res.get("user") or res.get("usuario") or res.get("data")
                     if isinstance(userobj, dict):
                         for key in ("rol_id", "role_id", "id_rol", "rolid", "rol", "role"):
                             if key in userobj and userobj.get(key) is not None:
-                                role_raw = userobj.get(key)
-                                break
+                                role_raw = userobj.get(key); break
 
             role_name = normalize_role(role_raw, default=self.DEFAULT_ROLE)
             self.error_label.setVisible(False)
@@ -267,3 +410,21 @@ class LoginWindow(QtWidgets.QMainWindow):
     def _abort_reply(self, reply: QtNetwork.QNetworkReply):
         if reply is self._pending_reply and reply.isRunning():
             reply.abort()
+
+    # Limpieza segura al cerrar
+    def closeEvent(self, e: QtGui.QCloseEvent) -> None:
+        try:
+            if hasattr(self, "_api_monitor") and self._api_monitor:
+                self._api_monitor.stop()
+        except Exception:
+            pass
+        try:
+            if getattr(self, "_pending_reply", None) is not None:
+                rep = self._pending_reply
+                self._pending_reply = None
+                if rep.isRunning():
+                    rep.abort()
+                rep.deleteLater()
+        except Exception:
+            pass
+        super().closeEvent(e)

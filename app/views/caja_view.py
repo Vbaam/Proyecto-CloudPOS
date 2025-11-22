@@ -1,4 +1,5 @@
 from __future__ import annotations
+import json
 from typing import Optional, List, Tuple, Dict
 from PySide6 import QtCore, QtGui, QtWidgets
 from app.servicios.api import ApiClient
@@ -481,22 +482,49 @@ class CajaView(QtWidgets.QWidget):
             return
 
     def _generar_json_venta(self, usuario: str, metodo_pago: str):
-        # Generar JSON 
+        import json
         json_str = generate_sale_json(self.model_carrito, usuario, metodo_pago=metodo_pago)
         self._last_sale_json = json_str
-
         print("[CajaView] Venta (JSON):", json_str)
 
-        total_text = self.lbl_total.text().replace("Total: ", "")
-        QtWidgets.QMessageBox.information(
-            self, "Cobrar",
-            f"JSON de venta generado internamente.\n"
-            f"Usuario: {usuario}\n"
-            f"Método: {metodo_pago}\n"
-            f"Elementos: {self.model_carrito.rowCount()}\n"
-            f"Total: {total_text}"
-        )
+        if metodo_pago == "Tarjeta":
+            total_text = self.lbl_total.text().replace("Total: ", "")
+            QtWidgets.QMessageBox.information(
+                self, "Cobrar",
+                f"JSON de venta generado internamente.\n"
+                f"Usuario: {usuario}\n"
+                f"Método: {metodo_pago}\n"
+                f"Elementos: {self.model_carrito.rowCount()}\n"
+                f"Total: {total_text}"
+            )
+            return
 
+        try:
+            payload_full = json.loads(json_str)
+        except Exception:
+            QtWidgets.QMessageBox.warning(self, "Efectivo", "No se pudo preparar el payload de la venta.")
+            return
+
+        payload_api = {
+            "fecha": payload_full.get("fecha"),
+            "hora":  payload_full.get("hora"),
+            "total": payload_full.get("total"),
+            "items": payload_full.get("items") or [],
+        }
+
+        client = ApiClient()
+        resp = client.post_json("/ventas", payload_api)
+
+        if isinstance(resp, dict) and resp.get("error"):
+            msg = resp.get("detail")
+            if isinstance(msg, list) and msg and isinstance(msg[0], dict):
+                msg = msg[0].get("msg") or str(msg)
+            msg = msg or f"HTTP {resp.get('status', '')}"
+            QtWidgets.QMessageBox.warning(self, "Efectivo", f"No se pudo registrar la venta:\n{msg}")
+            return
+
+        QtWidgets.QMessageBox.information(self, "Efectivo", "Venta registrada correctamente.")
+        self._vaciar_carrito()
 
     # ------------------- Utilidades -------------------
     def _fmt_money(self, v: int) -> str:

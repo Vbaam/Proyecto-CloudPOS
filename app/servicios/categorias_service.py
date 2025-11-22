@@ -48,16 +48,30 @@ class _CrearCategoriaWorker(QtCore.QObject):
             if err:
                 self.finished.emit("", err)
                 return
+
             payload = construir_payload_crear_categoria(self.nombre)
             res = self.client.post_json("/categorias", payload)
+
+            if isinstance(res, dict):
+                status = int(res.get("status", 200))
+                is_error = bool(res.get("error")) or status >= 400
+                if is_error:
+                    detail = res.get("detail")
+                    if isinstance(detail, list) and detail and isinstance(detail[0], dict):
+                        detail = detail[0].get("msg") or str(detail)
+                    msg = detail or res.get("message") or f"Error HTTP {status}"
+                    self.finished.emit("", msg)
+                    return
+
             msg = parsear_respuesta_crear_categoria(res)
             if DEBUG:
                 print(f"[CategoriasService] POST /categorias OK -> {msg!r}")
-            self.finished.emit(msg, "")
+            self.finished.emit(msg or "Categoría creada", "")
         except Exception as e:
             if DEBUG:
                 print(f"[CategoriasService] POST /categorias ERROR: {e!r}")
             self.finished.emit("", str(e))
+
 
 class _EliminarCategoriaWorker(QtCore.QObject):
     finished = QtCore.Signal(str, str)  # (mensaje, error)
