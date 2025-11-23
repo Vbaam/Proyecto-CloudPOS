@@ -176,6 +176,10 @@ class CajaView(QtWidgets.QWidget):
         self.spn_qty.setRange(1, 1_000_000)
         self.spn_qty.setValue(1)
         self.btn_agregar = QtWidgets.QPushButton("Agregar al carrito")
+        self.spn_qty.setButtonSymbols(QtWidgets.QAbstractSpinBox.NoButtons)  
+        self.spn_qty.setFocusPolicy(QtCore.Qt.StrongFocus)                   
+        self.spn_qty.setAccelerated(True)                                    
+        self.spn_qty.setKeyboardTracking(True)   
         qty_row.addWidget(QtWidgets.QLabel("Cantidad:"))
         qty_row.addWidget(self.spn_qty)
         qty_row.addStretch(1)
@@ -222,6 +226,7 @@ class CajaView(QtWidgets.QWidget):
         bottom.addWidget(self.lbl_total)
         bottom.addStretch(1)
         self.btn_cobrar = QtWidgets.QPushButton("Cobrar")
+        self.btn_cobrar.setObjectName("primaryButton") 
         bottom.addWidget(self.btn_cobrar)
         right.addLayout(bottom)
 

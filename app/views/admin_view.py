@@ -1,6 +1,7 @@
 from __future__ import annotations
 from typing import Optional, Tuple, List
 from PySide6 import QtCore, QtGui, QtWidgets
+import os
 
 from app.funciones.admin import exportar_csv, aplicar_filtro_movimientos, validar_nombre_categoria
 from app.servicios.api import ApiClient
@@ -37,6 +38,7 @@ class AdminView(QtWidgets.QWidget):
         self.btn_cat_reload = QtWidgets.QPushButton("Recargar")
         self.btn_cat_new = QtWidgets.QPushButton("Nueva")
         self.btn_cat_del = QtWidgets.QPushButton("Eliminar")
+        self.btn_cat_new.setObjectName("primaryButton") 
         self.btn_cat_del.setObjectName("dangerButton")
         toolbar.addWidget(self.btn_cat_reload)
         toolbar.addSpacing(12)
@@ -167,6 +169,21 @@ class AdminView(QtWidgets.QWidget):
         self.dt_hasta.setCalendarPopup(True)
         self.dt_hasta.setDisplayFormat("yyyy-MM-dd")
         self.dt_hasta.setDate(QtCore.QDate.currentDate())
+
+        # Filtros de fecha (Ventas)
+        self.dt_desde.setDisplayFormat("yyyy-MM-dd")
+        self.dt_hasta.setDisplayFormat("yyyy-MM-dd")
+        self.dt_desde.setCalendarPopup(True)
+        self.dt_hasta.setCalendarPopup(True)
+
+        self.dt_desde.setButtonSymbols(QtWidgets.QAbstractSpinBox.NoButtons)
+        self.dt_hasta.setButtonSymbols(QtWidgets.QAbstractSpinBox.NoButtons)
+        
+        cal_d = self.dt_desde.calendarWidget()
+        cal_h = self.dt_hasta.calendarWidget()
+        
+        cal_d.setObjectName("AppCalendar")
+        cal_h.setObjectName("AppCalendar")
 
         self.txt_buscar_ventas = QtWidgets.QLineEdit()
         self.txt_buscar_ventas.setPlaceholderText("Buscar: transacción, vendedor o producto…")
@@ -664,12 +681,12 @@ class NewUserDialog(QtWidgets.QDialog):
         btns.rejected.connect(self.reject)
         layout.addRow(btns)
 
-        def get_payload(self) -> dict:
-            from datetime import datetime
-            rol_id = self.cbo_rol.currentData()
-            return {
-                "nombre": self.txt_nombre.text().strip(),
-                "contrasena": self.txt_contrasena.text(),
-                "rol_id": int(rol_id),
-                "fecha": datetime.now().isoformat()
-            }
+    def get_payload(self) -> dict:
+        from datetime import datetime
+        rol_id = self.cbo_rol.currentData()
+        return {
+            "nombre": self.txt_nombre.text().strip(),
+            "contrasena": self.txt_contrasena.text(),
+            "rol_id": int(rol_id),
+            "fecha": datetime.now().isoformat()
+        }

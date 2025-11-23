@@ -1,31 +1,376 @@
-/* Tipografía y elementos base */
-* { font-size: 14px; }
-QLineEdit, QComboBox, QPushButton { padding: 6px; }
+/* =========================
+   CloudPOS — Tema Minimal
+   Paleta:
+   026E81 (teal oscuro), 00ABBD (cyan), 0099DD (azul),
+   FF9933 (acento), A1C7E0 (celeste claro)
+   Grises: fondo #F6F8FA, borde #DCE3EA, texto #1F2937,#4B5563
+   ========================= */
 
-/* Botón primario */
+* {
+  font-family: "Inter", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  font-size: 13px;
+  color: #1F2937; /* gris-900 */
+}
+
+/* ---------- Ventanas y contenedores ---------- */
+QMainWindow, QWidget {
+  background: #F6F8FA; /* gris muy claro */
+}
+
+QFrame[card="true"], /* tarjetas declaradas en vistas */
+QGroupBox {
+  background: #FFFFFF;
+  border: 1px solid #DCE3EA;
+  border-radius: 12px;
+}
+
+QGroupBox::title {
+  subcontrol-origin: margin;
+  subcontrol-position: top left;
+  padding: 6px 10px;
+  color: #026E81;
+  font-weight: 600;
+}
+
+/* ---------- Etiquetas y errores ---------- */
+QLabel#errorLabel {
+  color: #C0362C;
+  border: 1px solid rgba(192, 54, 44, 0.20);
+  background: rgba(192, 54, 44, 0.05);
+  padding: 8px 10px;
+  border-radius: 8px;
+}
+
+/* Puntito de estado (login, barra) */
+#statusDot {
+  background: #E11D48; /* rojo */
+  border-radius: 6px;
+  border: 1px solid rgba(0,0,0,0.10);
+}
+#statusDot[status="ok"] {
+  background: #22C55E; /* verde */
+}
+
+/* ---------- Entradas ---------- */
+QLineEdit, QPlainTextEdit, QTextEdit, QComboBox, QSpinBox, QDoubleSpinBox, QDateEdit, QTimeEdit, QDateTimeEdit {
+  background: #FFFFFF;
+  border: 1px solid #DCE3EA;
+  border-radius: 10px;
+  padding: 6px 10px;
+}
+QLineEdit:focus, QPlainTextEdit:focus, QTextEdit:focus,
+QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus,
+QDateEdit:focus, QTimeEdit:focus, QDateTimeEdit:focus {
+  border: 1px solid #0099DD;
+}
+
+/* Placeholders más suaves */
+QLineEdit[placeholderText], QTextEdit[placeholderText] {
+  color: #6B7280; /* gris-500 */
+}
+
+/* QComboBox */
+QComboBox::drop-down {
+  width: 26px;
+  border-left: 1px solid #DCE3EA;
+  border-top-right-radius: 10px;
+  border-bottom-right-radius: 10px;
+  background: #F9FAFB;
+}
+QComboBox::down-arrow {
+  image: url(%ICONS%/arrow-down.png);
+  margin-right: 6px;
+  width: 12px; height: 12px;
+}
+
+/* QSpinBox — (si decides mostrar flechas, puedes reactivar) */
+QSpinBox::up-button, QDoubleSpinBox::up-button,
+QSpinBox::down-button, QDoubleSpinBox::down-button {
+  width: 0px; height: 0px; border: none; padding: 0; margin: 0; /* ocultas por diseño */
+}
+
+/* ---------- Botones ---------- */
+QPushButton {
+  background: #FFFFFF;
+  color: #1F2937;
+  border: 1px solid #DCE3EA;
+  border-radius: 10px;
+  padding: 8px 14px;
+}
+QPushButton:hover { background: #F3F7FA; }
+QPushButton:pressed { background: #EAF2F7; }
+
+/* Botón primario (usar setObjectName("primaryButton")) */
 QPushButton#primaryButton {
-    background-color: #2d8cff; color: white; border-radius: 6px; padding: 8px 12px;
+  background: #0099DD;
+  color: #FFFFFF;
+  border: 1px solid #0099DD;
 }
-QPushButton#primaryButton:disabled {
-    background-color: #a7c7ff; color: #f0f0f0;
+QPushButton#primaryButton:hover { background: #00ABBD; border-color: #00ABBD; }
+QPushButton#primaryButton:pressed { background: #026E81; border-color: #026E81; }
+
+/* Botón peligro (Eliminar) */
+QPushButton#dangerButton {
+  background: #C0362C;
+  color: #FFFFFF;
+  border: 1px solid #C0362C;
 }
+QPushButton#dangerButton:hover { background: #D2463B; border-color: #D2463B; }
+QPushButton#dangerButton:pressed { background: #A52B22; border-color: #A52B22; }
 
-/* Mensajes de error */
-QLabel#errorLabel { color: #d32f2f; }
-
-/* Indicador de estado (usa property status="ok"|"bad") */
-QLabel#statusDot[status="ok"] { background: #2e7d32; border-radius: 6px; min-width: 12px; min-height: 12px; }
-QLabel#statusDot[status="bad"] { background: #d32f2f; border-radius: 6px; min-width: 12px; min-height: 12px; }
-
-/* Tarjetas */
-QFrame[card="true"] { border: 1px solid #e0e0e0; border-radius: 8px; }
-
-/* Tablas */
-QTableView {
-    selection-background-color: #e3f2fd;
-    selection-color: #000;
-    gridline-color: #e0e0e0;
+/* Botón acento (opcional) */
+QPushButton#accentButton {
+  background: #FF9933;
+  color: #1F2937;
+  border: 1px solid #FF9933;
 }
+QPushButton#accentButton:hover { background: #FFB766; border-color: #FFB766; }
+QPushButton#accentButton:pressed { background: #F08A1E; border-color: #F08A1E; }
+
+/* ---------- Tabs ---------- */
+QTabBar::tab {
+  background: transparent;
+  padding: 8px 14px;
+  margin-right: 6px;
+  border-bottom: 2px solid transparent;
+  color: #4B5563;
+}
+QTabBar::tab:selected {
+  color: #026E81;
+  border-bottom: 2px solid #026E81;
+}
+QTabWidget::pane { border: none; margin-top: 6px; }
+
+/* ---------- Tablas ---------- */
 QHeaderView::section {
-    background: #f7f7f7; padding: 6px; border: 1px solid #e0e0e0;
+  background: #F3F7FA;
+  color: #374151;
+  padding: 8px 10px;
+  border: 1px solid #DCE3EA;
+  border-top-left-radius: 8px;
+  border-top-right-radius: 8px;
+}
+QTableView {
+  background: #FFFFFF;
+  border: 1px solid #DCE3EA;
+  border-radius: 10px;
+  gridline-color: #EEF2F7;
+  selection-background-color: rgba(0,153,221,0.15);
+  selection-color: #111827;
+}
+QTableView::item { padding: 6px 8px; }
+
+/* ---------- Barra de estado ---------- */
+QStatusBar { background: transparent; border-top: 1px solid #E5E7EB; }
+
+/* ---------- Scrollbars sutiles ---------- */
+QScrollBar:vertical, QScrollBar:horizontal { background: transparent; margin: 0px; }
+QScrollBar::handle:vertical, QScrollBar::handle:horizontal {
+  background: #DCE3EA; border-radius: 6px; min-height: 24px; min-width: 24px;
+}
+QScrollBar::handle:hover { background: #C9D6E3; }
+QScrollBar::add-line, QScrollBar::sub-line { height: 0px; width: 0px; }
+
+/* ===== Navegación lateral ===== */
+QListWidget#navList {
+  background: #FFFFFF;
+  border: 1px solid #DCE3EA;
+  border-radius: 12px;
+  padding: 8px;
+}
+QListWidget#navList::item {
+  color: #1F2937;
+  padding: 8px 10px;
+  margin: 2px 0;
+  border-radius: 8px;
+}
+QListWidget#navList::item:selected {
+  background: rgba(0,153,221,0.15);
+  color: #026E81;
+}
+QListWidget#navList::item:hover { background: #F3F7FA; }
+
+/* ===== QDateEdit (filtros de fechas) ===== */
+QDateEdit {
+  background: #FFFFFF;
+  border: 1px solid #DCE3EA;
+  border-radius: 10px;
+  padding: 6px 10px;
+  min-width: 150px;
+}
+QDateEdit:focus {
+  border: 1px solid #0099DD;
+}
+QDateEdit::drop-down {
+  width: 30px;
+  border-left: 1px solid #DCE3EA;
+  border-top-right-radius: 10px;
+  border-bottom-right-radius: 10px;
+  background: #F3F7FA;
+}
+QDateEdit::down-arrow {
+  image: url(%ICONS%/arrow-down.png);
+  width: 14px;
+  height: 14px;
+  margin-right: 8px;
+}
+
+/* ===== Calendario popup ===== */
+QCalendarWidget {
+  background: #FFFFFF;
+  border: 1px solid #DCE3EA;
+  border-radius: 12px;
+}
+
+/* Barra de navegación (mes/año y flechas) */
+QCalendarWidget QWidget#qt_calendar_navigationbar {
+  background: #F3F7FA;
+  border-bottom: 1px solid #DCE3EA;
+}
+
+/* Botones navegar mes anterior/siguiente: grandes y visibles */
+QCalendarWidget QToolButton#qt_calendar_prevmonth,
+QCalendarWidget QToolButton#qt_calendar_nextmonth {
+  background: transparent;
+  padding: 6px;
+  border-radius: 8px;
+  min-width: 28px;
+  min-height: 28px;
+}
+QCalendarWidget QToolButton#qt_calendar_prevmonth {
+  qproperty-icon: url(%ICONS%/chevron-left.png);
+  qproperty-iconSize: 16px 16px;
+}
+QCalendarWidget QToolButton#qt_calendar_nextmonth {
+  qproperty-icon: url(%ICONS%/chevron-right.png);
+  qproperty-iconSize: 16px 16px;
+}
+QCalendarWidget QToolButton#qt_calendar_prevmonth:hover,
+QCalendarWidget QToolButton#qt_calendar_nextmonth:hover {
+  background: rgba(0,153,221,0.12);
+}
+QCalendarWidget QToolButton#qt_calendar_prevmonth:pressed,
+QCalendarWidget QToolButton#qt_calendar_nextmonth:pressed {
+  background: rgba(0,153,221,0.18);
+}
+
+/* Botones de mes y año (centro) */
+QCalendarWidget QToolButton#qt_calendar_monthbutton,
+QCalendarWidget QToolButton#qt_calendar_yearbutton {
+  background: transparent;
+  color: #026E81;
+  font-weight: 600;
+  padding: 4px 8px;
+  border-radius: 6px;
+}
+QCalendarWidget QToolButton#qt_calendar_monthbutton:hover,
+QCalendarWidget QToolButton#qt_calendar_yearbutton:hover {
+  background: rgba(0,153,221,0.10);
+}
+
+/* Cabecera de días (Lu, Ma, …) */
+QCalendarWidget QTableView QHeaderView::section {
+  background: #F3F7FA;
+  color: #374151;
+  padding: 6px 8px;
+  border: none;
+}
+
+/* Celdas de días */
+QCalendarWidget QTableView {
+  selection-background-color: rgba(0,153,221,0.18);
+  selection-color: #111827;
+  gridline-color: #EEF2F7;
+}
+QCalendarWidget QAbstractItemView:enabled { color: #1F2937; }
+QCalendarWidget QAbstractItemView:disabled { color: #9CA3AF; }
+
+/* Día seleccionado / hoy */
+QCalendarWidget QTableView::item:selected {
+  background: rgba(0,153,221,0.18);
+  color: #026E81;
+  font-weight: 600;
+}
+
+/* ====== Estilo del calendario popup dirigido por ID ====== */
+QCalendarWidget#AppCalendar {
+  background: #FFFFFF;
+  border: 1px solid #DCE3EA;
+  border-radius: 12px;
+}
+
+/* Barra superior (mes/año y flechas) */
+QCalendarWidget#AppCalendar QWidget#qt_calendar_navigationbar {
+  background: #F3F7FA;
+  border-bottom: 1px solid #DCE3EA;
+}
+
+/* Botones prev/next con iconos claros */
+QCalendarWidget#AppCalendar QToolButton#qt_calendar_prevmonth,
+QCalendarWidget#AppCalendar QToolButton#qt_calendar_nextmonth {
+  background: transparent;
+  padding: 6px;
+  border-radius: 8px;
+  min-width: 28px;
+  min-height: 28px;
+}
+QCalendarWidget#AppCalendar QToolButton#qt_calendar_prevmonth {
+  qproperty-icon: url(%ICONS%/chevron-left.png);
+  qproperty-iconSize: 16px 16px;
+}
+QCalendarWidget#AppCalendar QToolButton#qt_calendar_nextmonth {
+  qproperty-icon: url(%ICONS%/chevron-right.png);
+  qproperty-iconSize: 16px 16px;
+}
+QCalendarWidget#AppCalendar QToolButton#qt_calendar_prevmonth:hover,
+QCalendarWidget#AppCalendar QToolButton#qt_calendar_nextmonth:hover {
+  background: rgba(0,153,221,0.12);
+}
+QCalendarWidget#AppCalendar QToolButton#qt_calendar_prevmonth:pressed,
+QCalendarWidget#AppCalendar QToolButton#qt_calendar_nextmonth:pressed {
+  background: rgba(0,153,221,0.18);
+}
+
+/* Botones de mes y año (centro) */
+QCalendarWidget#AppCalendar QToolButton#qt_calendar_monthbutton,
+QCalendarWidget#AppCalendar QToolButton#qt_calendar_yearbutton {
+  background: transparent;
+  color: #026E81;
+  font-weight: 600;
+  padding: 4px 8px;
+  border-radius: 6px;
+}
+QCalendarWidget#AppCalendar QToolButton#qt_calendar_monthbutton:hover,
+QCalendarWidget#AppCalendar QToolButton#qt_calendar_yearbutton:hover {
+  background: rgba(0,153,221,0.10);
+}
+
+/* Cabecera de días (Lu, Ma, …) */
+QCalendarWidget#AppCalendar QTableView QHeaderView::section {
+  background: #F3F7FA;
+  color: #374151;
+  padding: 6px 8px;
+  border: none;
+}
+
+/* Celdas de días */
+QCalendarWidget#AppCalendar QTableView {
+  selection-background-color: rgba(0,153,221,0.18);
+  selection-color: #111827;
+  gridline-color: #EEF2F7;
+}
+QCalendarWidget#AppCalendar QAbstractItemView:enabled { color: #1F2937; }
+QCalendarWidget#AppCalendar QAbstractItemView:disabled { color: #9CA3AF; }
+
+/* Día seleccionado / hoy */
+QCalendarWidget#AppCalendar QTableView::item:selected {
+  background: rgba(0,153,221,0.18);
+  color: #026E81;
+  font-weight: 600;
+}
+
+/* Flecha de despliegue del QDateEdit (ya funcionando con %ICONS%) */
+QDateEdit::down-arrow {
+  image: url(%ICONS%/arrow-down.png);
+  width: 14px; height: 14px; margin-right: 8px;
 }
