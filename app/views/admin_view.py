@@ -171,24 +171,25 @@ class AdminView(QtWidgets.QWidget):
         self.dt_hasta.setDate(QtCore.QDate.currentDate())
 
         # Filtros de fecha (Ventas)
-        self.dt_desde.setDisplayFormat("yyyy-MM-dd")
-        self.dt_hasta.setDisplayFormat("yyyy-MM-dd")
-        self.dt_desde.setCalendarPopup(True)
-        self.dt_hasta.setCalendarPopup(True)
-
         self.dt_desde.setButtonSymbols(QtWidgets.QAbstractSpinBox.NoButtons)
         self.dt_hasta.setButtonSymbols(QtWidgets.QAbstractSpinBox.NoButtons)
         
-        cal_d = self.dt_desde.calendarWidget()
-        cal_h = self.dt_hasta.calendarWidget()
-        
+        cal_d = QtWidgets.QCalendarWidget()
         cal_d.setObjectName("AppCalendar")
+        cal_d.setVerticalHeaderFormat(QtWidgets.QCalendarWidget.NoVerticalHeader) 
+        self.dt_desde.setCalendarWidget(cal_d)
+
+        cal_h = QtWidgets.QCalendarWidget()
         cal_h.setObjectName("AppCalendar")
+        cal_h.setVerticalHeaderFormat(QtWidgets.QCalendarWidget.NoVerticalHeader)
+        self.dt_hasta.setCalendarWidget(cal_h)
+        # ------------------------------------------------------------------------
 
         self.txt_buscar_ventas = QtWidgets.QLineEdit()
         self.txt_buscar_ventas.setPlaceholderText("Buscar: transacción, vendedor o producto…")
 
         self.btn_filtrar_ventas = QtWidgets.QPushButton("Buscar")
+        self.btn_filtrar_ventas.setObjectName("primaryButton")
         self.btn_limpiar_ventas = QtWidgets.QPushButton("Limpiar")
 
         filtros.addWidget(lbl_desde)
@@ -441,6 +442,7 @@ class AdminView(QtWidgets.QWidget):
         toolbar = QtWidgets.QHBoxLayout()
         self.btn_usr_reload = QtWidgets.QPushButton("Recargar")
         self.btn_usr_new = QtWidgets.QPushButton("Nuevo usuario")
+        self.btn_usr_new.setObjectName("primaryButton")
         self.btn_usr_edit_name = QtWidgets.QPushButton("Editar nombre")
         self.btn_usr_edit_pwd = QtWidgets.QPushButton("Cambiar contraseña")
         toolbar.addWidget(self.btn_usr_reload)
